@@ -373,6 +373,133 @@ class TestInfo:
         assert not tree.isfile("/dir")
 
 
+class TestFilenamesWithDots:
+    """Test filenames containing dots, hyphens, etc."""
+
+    def test_cat_ignores_children_with_dots(self):
+        """Parent's cat() should not include child tags like <file.txt>."""
+        tree = Loopy()
+        tree.mkdir("/project/src", parents=True)
+        tree.touch("/project/src/main.py", "print('hello')")
+        tree.touch("/project/README.md", "# Docs")
+
+        # Parent directories should have empty content
+        assert tree.cat("/project") == ""
+        assert tree.cat("/project/src") == ""
+
+        # Leaves should have their content
+        assert tree.cat("/project/src/main.py") == "print('hello')"
+        assert tree.cat("/project/README.md") == "# Docs"
+
+    def test_tree_no_raw_xml_in_directories(self):
+        """Tree output should not show raw XML for directory nodes."""
+        tree = Loopy()
+        tree.touch("/a/file.txt", "content")
+        tree.touch("/a/data.json", '{"key": "value"}')
+
+        viz = tree.tree()
+
+        # Should NOT contain raw tags in the visualization
+        assert "<file.txt>" not in viz
+        assert "<data.json>" not in viz
+
+        # Should show clean directory
+        assert "a/" in viz
+
+    def test_ls_with_dotted_names(self):
+        """ls should return filenames with dots."""
+        tree = Loopy()
+        tree.touch("/src/app.min.js", "minified")
+        tree.touch("/src/style.css", "styles")
+        tree.touch("/.hidden", "secret")
+
+        assert "app.min.js" in tree.ls("/src")
+        assert "style.css" in tree.ls("/src")
+        assert ".hidden" in tree.ls("/")
+
+    def test_operations_on_dotted_paths(self):
+        """All operations should work with dotted filenames."""
+        tree = Loopy()
+        tree.touch("/config.dev.json", '{"env": "dev"}')
+
+        # mv
+        tree.mv("/config.dev.json", "/config.prod.json")
+        assert tree.exists("/config.prod.json")
+        assert not tree.exists("/config.dev.json")
+
+        # cp
+        tree.cp("/config.prod.json", "/backup/config.prod.json")
+        assert tree.exists("/backup/config.prod.json")
+
+        # sed
+        tree.sed("/config.prod.json", "dev", "prod")
+        assert "prod" in tree.cat("/config.prod.json")
+
+        # grep
+        assert "/config.prod.json" in tree.grep("config")
+
+
+class TestCd:
+    """Test cd (change directory) functionality."""
+
+    def test_cd_basic(self):
+        tree = Loopy()
+        tree.mkdir("/a/b/c", parents=True)
+
+        tree.cd("/a/b")
+        assert tree.cwd == "/a/b"
+
+        tree.cd("c")  # relative
+        assert tree.cwd == "/a/b/c"
+
+    def test_cd_affects_operations(self):
+        tree = Loopy()
+        tree.mkdir("/project/src", parents=True)
+        tree.cd("/project")
+
+        # touch with relative path
+        tree.touch("README.md", "hello")
+        assert tree.exists("/project/README.md")
+
+        # ls without args = cwd
+        assert "src" in tree.ls()
+        assert "README.md" in tree.ls()
+
+        # cat with relative path
+        assert tree.cat("README.md") == "hello"
+
+    def test_cd_chaining(self):
+        tree = (
+            Loopy()
+            .mkdir("/a/b", parents=True)
+            .cd("/a")
+            .touch("file1", "content1")
+            .cd("b")
+            .touch("file2", "content2")
+        )
+
+        assert tree.cwd == "/a/b"
+        assert tree.cat("/a/file1") == "content1"
+        assert tree.cat("/a/b/file2") == "content2"
+
+    def test_cd_nonexistent_raises(self):
+        tree = Loopy()
+        try:
+            tree.cd("/nonexistent")
+            assert False, "Should have raised KeyError"
+        except KeyError:
+            pass
+
+    def test_cd_dot_means_cwd(self):
+        tree = Loopy()
+        tree.mkdir("/a/b", parents=True)
+        tree.cd("/a/b")
+
+        # "." should resolve to cwd
+        assert tree.ls(".") == tree.ls()
+        assert tree.tree(".") == tree.tree()
+
+
 class TestHeadTail:
     """Test head/tail operations."""
 
@@ -404,6 +531,8 @@ if __name__ == "__main__":
         TestDu,
         TestEdgeCases,
         TestInfo,
+        TestFilenamesWithDots,
+        TestCd,
         TestHeadTail,
     ]
 

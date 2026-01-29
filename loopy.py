@@ -29,6 +29,31 @@ class Loopy:
 
     def __init__(self, data: str = "<root/>"):
         self._data = data if data else "<root/>"
+        self._cwd = "/"
+
+    @property
+    def cwd(self) -> str:
+        """Current working directory."""
+        return self._cwd
+
+    def _resolve(self, path: str) -> str:
+        """Resolve path relative to cwd. Use '.' for current directory."""
+        if not path or path == ".":
+            return self._cwd
+        if path.startswith("/"):
+            return path  # Absolute path
+        # Relative path - join with cwd
+        if self._cwd == "/":
+            return f"/{path}"
+        return f"{self._cwd}/{path}"
+
+    def cd(self, path: str = "/") -> "Loopy":
+        """Change working directory. Returns self for chaining."""
+        resolved = self._resolve(path)
+        if not self.exists(resolved):
+            raise KeyError(f"Path does not exist: {resolved}")
+        self._cwd = resolved
+        return self
 
     @property
     def raw(self) -> str:
@@ -165,14 +190,16 @@ class Loopy:
 
     def exists(self, path: str) -> bool:
         """Check if a path exists."""
+        path = self._resolve(path)
         try:
             self._find_node(path)
             return True
         except KeyError:
             return False
 
-    def ls(self, path: str = "/") -> list[str]:
+    def ls(self, path: str = ".") -> list[str]:
         """List children of a node."""
+        path = self._resolve(path)
         _, _, has_content, content = self._find_node(path)
         if not has_content:
             return []
@@ -180,6 +207,7 @@ class Loopy:
 
     def cat(self, path: str) -> str:
         """Get the text content of a node (excludes child tags)."""
+        path = self._resolve(path)
         _, _, has_content, content = self._find_node(path)
         if not has_content:
             return ""
@@ -187,8 +215,8 @@ class Loopy:
         result = []
         pos = 0
         while pos < len(content):
-            # Find next tag
-            tag_match = re.search(r"<(\w+)(/?>)", content[pos:])
+            # Find next tag (names can have dots, hyphens)
+            tag_match = re.search(r"<([\w.\-]+)(/?>)", content[pos:])
             if not tag_match:
                 result.append(content[pos:])
                 break
@@ -223,6 +251,7 @@ class Loopy:
 
     def mkdir(self, path: str, parents: bool = False) -> "Loopy":
         """Create a directory node. Use parents=True for mkdir -p behavior."""
+        path = self._resolve(path)
         segments = self._normalize_path(path)
         if not segments:
             return self
@@ -284,6 +313,7 @@ class Loopy:
 
     def touch(self, path: str, content: str = "") -> "Loopy":
         """Create a leaf node with optional content."""
+        path = self._resolve(path)
         if self.exists(path):
             # Update content if exists
             if content:
@@ -326,6 +356,7 @@ class Loopy:
 
     def write(self, path: str, content: str) -> "Loopy":
         """Write/overwrite content to a node."""
+        path = self._resolve(path)
         if not self.exists(path):
             return self.touch(path, content)
 
@@ -352,6 +383,7 @@ class Loopy:
 
     def rm(self, path: str) -> "Loopy":
         """Remove a node and its children."""
+        path = self._resolve(path)
         if path == "/" or not path:
             self._data = "<root/>"
             return self
@@ -363,6 +395,8 @@ class Loopy:
 
     def mv(self, src: str, dst: str) -> "Loopy":
         """Move a node to a new location."""
+        src = self._resolve(src)
+        dst = self._resolve(dst)
         # Get source node
         start, end, _, _ = self._find_node(src)
         node_str = self._data[start:end]
@@ -413,6 +447,8 @@ class Loopy:
 
     def cp(self, src: str, dst: str) -> "Loopy":
         """Copy a node to a new location."""
+        src = self._resolve(src)
+        dst = self._resolve(dst)
         start, end, _, _ = self._find_node(src)
         node_str = self._data[start:end]
 
@@ -460,7 +496,7 @@ class Loopy:
     def grep(
         self,
         pattern: str,
-        path: str = "/",
+        path: str = ".",
         content: bool = False,
         ignore_case: bool = True,
         invert: bool = False,
@@ -480,6 +516,7 @@ class Loopy:
         Returns:
             List of matching paths, or count if count=True
         """
+        path = self._resolve(path)
         flags = re.IGNORECASE if ignore_case else 0
         regex = re.compile(pattern, flags)
         results = []
@@ -536,6 +573,7 @@ class Loopy:
         Returns:
             self for chaining
         """
+        path = self._resolve(path)
         flags = re.IGNORECASE if ignore_case else 0
 
         def _apply(node_path: str):
@@ -554,8 +592,9 @@ class Loopy:
 
         return self
 
-    def tree(self, path: str = "/") -> str:
+    def tree(self, path: str = ".") -> str:
         """Return a tree visualization."""
+        path = self._resolve(path)
         lines = []
 
         def _walk(current_path: str, prefix: str, is_last: bool, is_root: bool):
@@ -587,7 +626,7 @@ class Loopy:
         _walk(path, "", True, True)
         return "\n".join(lines)
 
-    def find(self, path: str = "/", name: Optional[str] = None, type: Optional[str] = None) -> list[str]:
+    def find(self, path: str = ".", name: Optional[str] = None, type: Optional[str] = None) -> list[str]:
         """
         Find nodes by name pattern (like find -name).
 
@@ -596,6 +635,7 @@ class Loopy:
             name: Regex pattern to match node names
             type: 'd' for directories (nodes with children), 'f' for files (leaf nodes)
         """
+        path = self._resolve(path)
         results = []
         pattern = re.compile(name, re.IGNORECASE) if name else None
 
@@ -619,12 +659,13 @@ class Loopy:
         _walk(path)
         return results
 
-    def walk(self, path: str = "/") -> list[tuple[str, list[str], list[str]]]:
+    def walk(self, path: str = ".") -> list[tuple[str, list[str], list[str]]]:
         """
         Walk the tree like os.walk().
         Yields (dirpath, dirnames, filenames) tuples.
         Directories = nodes with children, Files = leaf nodes.
         """
+        path = self._resolve(path)
         results = []
 
         def _walk(current_path: str):
@@ -644,12 +685,13 @@ class Loopy:
         _walk(path)
         return results
 
-    def glob(self, pattern: str, path: str = "/") -> list[str]:
+    def glob(self, pattern: str, path: str = ".") -> list[str]:
         """
         Match paths using glob patterns.
         Supports: * (any chars), ** (any depth), ? (single char)
         Example: /animals/*/dog, /images/**/*.jpg
         """
+        path = self._resolve(path)
         # Convert glob to regex
         regex_pattern = pattern
         regex_pattern = regex_pattern.replace(".", r"\.")
@@ -673,15 +715,17 @@ class Loopy:
 
     def head(self, path: str, n: int = 10) -> str:
         """Get first n characters of content."""
+        path = self._resolve(path)
         content = self.cat(path)
         return content[:n]
 
     def tail(self, path: str, n: int = 10) -> str:
         """Get last n characters of content."""
+        path = self._resolve(path)
         content = self.cat(path)
         return content[-n:] if content else ""
 
-    def du(self, path: str = "/", content_size: bool = False) -> int:
+    def du(self, path: str = ".", content_size: bool = False) -> int:
         """
         Calculate size: node count or total content bytes.
 
@@ -689,6 +733,7 @@ class Loopy:
             path: Starting path
             content_size: If True, return total bytes of content. If False, return node count.
         """
+        path = self._resolve(path)
         total = 0
 
         def _walk(current_path: str):
@@ -705,6 +750,7 @@ class Loopy:
 
     def info(self, path: str) -> dict:
         """Get metadata about a node."""
+        path = self._resolve(path)
         _, _, has_content, content = self._find_node(path)
         children = self.ls(path)
         text_content = self.cat(path)
@@ -723,12 +769,14 @@ class Loopy:
 
     def isdir(self, path: str) -> bool:
         """Check if path is a directory (has children)."""
+        path = self._resolve(path)
         if not self.exists(path):
             return False
         return len(self.ls(path)) > 0
 
     def isfile(self, path: str) -> bool:
         """Check if path is a file (leaf node, no children)."""
+        path = self._resolve(path)
         if not self.exists(path):
             return False
         return len(self.ls(path)) == 0
