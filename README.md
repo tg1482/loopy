@@ -1,6 +1,8 @@
 # Loopy
 
-A filesystem API over a single Python string. Built for LLMs to organically grow and navigate knowledge structures.
+Loopy: a filesystem API over a single Python string.
+
+Loopy is a tiny Python library that exposes filesystem semantics over a single serialized string. Directories become concepts, files become entities, and paths encode relationships. Agents can create, search, reorganize, and evolve ontologies using commands they already understand.
 
 ```python
 from loopy import Loopy
@@ -17,53 +19,32 @@ tree = (
 tree.grep("predicts", content=True)  # find concepts by description
 tree.find("/concepts", type="f")  # all leaf concepts
 tree.ls("/concepts/ml")  # ['supervised', 'unsupervised']
+
+# tree.raw
+# <root><concepts><ml><supervised><regression>predicts continuous values</regression><classification>predicts categories</classification></supervised><unsupervised><clustering>groups similar items</clustering></unsupervised></ml></concepts></root>
 ```
 
 ## Why?
 
-**LLMs need structured memory.** When an agent processes information, it needs somewhere to put it—somewhere it can search, reorganize, and grow organically.
+When an agent processes information, it needs somewhere to put it - somewhere it can search, reorganize, and grow organically. For any type of knowledge base like agent memories, product taxonomies, etc the challenge was enabling recursive interaction without a pile of specialized tools (search, create, delete, etc.) that are added to context.
 
-Traditional options don't fit:
-- **JSON/dicts**: No natural hierarchy, awkward to traverse and modify
-- **Databases**: Heavy, require schema, overkill for ephemeral structures
-- **Files**: I/O overhead, permissions, cleanup headaches
+Recursive Language Models (RLMs) introduced the idea of putting the entire context into a Python variable and let the model recursively interact with it, instead of reasoning over everything in one shot. RLMs: https://alexzhang13.github.io/blog/2025/rlm/. I really liked it, but enabing REPL seemed like a bad tradeoff for generality. 
 
-Loopy gives you:
-- **One string** = trivial to serialize, store in context, pass between calls
-- **Filesystem semantics** = intuitive paths LLMs already understand
-- **Zero dependencies** = pure Python, copy and go
+Loopy imposes a known structure (a tree / filesystem), and replaces the REPL with composable Bash-style commands.
 
-## For Ontologies & Knowledge Graphs
+Why this approach:
 
-The filesystem metaphor maps naturally to knowledge organization:
+- simple - a single string can represent the full data
+- known structure - stored in a file system format agents already know and love
+- composition - compose search commands to quickly navigate the data
 
-| Filesystem | Knowledge Graph |
-|------------|-----------------|
-| Directories | Categories, concepts, groupings |
-| Files | Entities, facts, leaf nodes |
-| Paths | Relationships, "is-a" hierarchies |
-| Content | Attributes, descriptions, metadata |
 
-```python
-# Agent discovers and categorizes information
-tree = Loopy()
+## How it works
 
-# Build taxonomy as you learn
-tree.mkdir("/animals/mammals/canines", parents=True)
-tree.touch("/animals/mammals/canines/dog", "domesticated, loyal, pack animal")
-tree.touch("/animals/mammals/canines/wolf", "wild, apex predator, pack hunter")
-tree.mkdir("/animals/mammals/felines")
-tree.touch("/animals/mammals/felines/cat", "independent, domestic, solitary")
+Loopy keeps an in-memory node tree and exposes filesystem-like operations. The raw string is generated on demand and can be parsed back into the same structure.
 
-# Query the knowledge
-tree.find("/animals", type="f")  # all animals
-tree.grep("domestic", content=True)  # find domestic animals
-tree.grep("pack", content=True)  # find pack animals
-
-# Reorganize as understanding evolves
-tree.mkdir("/pets", parents=True)
-tree.mv("/animals/mammals/canines/dog", "/pets/dog")
-tree.mv("/animals/mammals/felines/cat", "/pets/cat")
+```
+<root><concepts><ml><supervised>...</supervised></ml></concepts></root>
 ```
 
 ## Install
@@ -88,6 +69,9 @@ run("touch /topics/physics/quantum/entanglement 'spooky action at distance'", tr
 run("find /topics -type f", tree)  # list all facts
 run("grep quantum /topics", tree)  # search
 run("tree /topics", tree)  # visualize
+
+# compose commands with pipes
+run("find /topics -type f | grep quantum", tree)  # find files, filter by name
 ```
 
 Commands: `ls`, `cd`, `pwd`, `cat`, `tree`, `find`, `grep`, `du`, `touch`, `mkdir`, `rm -r`, `mv`, `cp`, `sed`, `help`
@@ -136,6 +120,8 @@ Commands: `ls`, `cd`, `pwd`, `cat`, `tree`, `find`, `grep`, `du`, `touch`, `mkdi
 
 All mutating operations return `self` for chaining.
 
+Not all commands are supported in the shell format yet. Working towards it.
+
 ## Example Databases
 
 Loopy ships with example databases in `examples/`:
@@ -157,42 +143,6 @@ tree.ls("/clothing/mens/shoes")  # ['loafers_brown']
 tree.grep("price:.*99", content=True)  # products ending in .99
 ```
 
-## Serialization
-
-```python
-# Save anywhere - it's just a string
-saved = tree.raw
-redis.set("agent:memory", saved)
-db.store("knowledge", saved)
-
-# Restore
-tree = Loopy(redis.get("agent:memory"))
-
-# Initialize from existing structure
-tree = Loopy("<root><users><alice>admin</alice></users></root>")
-tree.cat("/users/alice")  # "admin"
-```
-
-## How It Works
-
-Internally, Loopy stores everything as XML-like tags:
-
-```
-<root><concepts><ml><supervised>...</supervised></ml></concepts></root>
-```
-
-## Internals
-
-Loopy stores the tree as a small in-memory node graph. The string form is
-generated on demand via `tree.raw` and can be parsed back into the same
-structure. This keeps most operations fast while preserving the single-string
-serialization model.
-
-## Special Characters
-
-Content is automatically XML-escaped:
-
-The entire tree is one string—no parsing into objects, no hidden state.
 
 ## License
 
