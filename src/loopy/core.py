@@ -5,6 +5,13 @@ from typing import Optional
 
 # Regex pattern for valid tag names (alphanumeric, underscore, hyphen, dot)
 TAG_NAME = r"[\w.\-]+"
+_TAG_NAME_RE = re.compile(f"^{TAG_NAME}$")
+
+
+def _validate_segment(seg: str) -> None:
+    """Raise ValueError if segment contains invalid characters."""
+    if not _TAG_NAME_RE.match(seg):
+        raise ValueError(f"Invalid path segment: {seg!r} (only alphanumeric, underscore, hyphen, dot allowed)")
 
 
 def _escape(text: str) -> str:
@@ -101,12 +108,17 @@ class Loopy:
 
     # --- Core Path Utilities ---
 
-    def _normalize_path(self, path: str) -> list[str]:
-        """Convert path string to list of segments."""
+    def _normalize_path(self, path: str, validate: bool = True) -> list[str]:
+        """Convert path string to list of segments, optionally validating."""
         path = path.strip("/")
         if not path:
             return []
-        return path.split("/")
+        segments = [s for s in path.split("/") if s and s != "."]
+        if validate:
+            for seg in segments:
+                if seg != "..":
+                    _validate_segment(seg)
+        return segments
 
     def _find_node(self, path: str) -> tuple[int, int, bool, str]:
         """
@@ -390,10 +402,14 @@ class Loopy:
         return self
 
     def write(self, path: str, content: str) -> "Loopy":
-        """Write/overwrite content to a node."""
+        """Write/overwrite content to a node. Raises IsADirectoryError for directories."""
         path = self._resolve(path)
         if not self.exists(path):
             return self.touch(path, content)
+
+        # Don't allow writing content to directories
+        if self.ls(path):
+            raise IsADirectoryError(f"Cannot write content to directory: {path}")
 
         segments = self._normalize_path(path)
         name = segments[-1] if segments else "root"
@@ -416,12 +432,18 @@ class Loopy:
 
         return self
 
-    def rm(self, path: str) -> "Loopy":
-        """Remove a node and its children."""
+    def rm(self, path: str, recursive: bool = False) -> "Loopy":
+        """Remove a node. Use recursive=True for non-empty directories."""
         path = self._resolve(path)
         if path == "/" or not path:
+            if not recursive:
+                raise OSError("Cannot remove root without recursive=True")
             self._data = "<root/>"
             return self
+
+        # Check if non-empty directory
+        if self.ls(path) and not recursive:
+            raise OSError(f"Directory not empty: {path} (use recursive=True)")
 
         start, end, _, _ = self._find_node(path)
         self._data = self._data[:start] + self._data[end:]
@@ -458,10 +480,17 @@ class Loopy:
         """Move a node to a new location. If dst is a directory, moves into it."""
         src, dst = self._resolve(src.rstrip("/")), self._resolve(dst.rstrip("/"))
 
+        # mv to self is a no-op (check before directory expansion)
+        if src == dst:
+            return self
+
         # If destination is existing directory, move INTO it with same name
         if self.exists(dst) and self.isdir(dst):
             src_name = self._normalize_path(src)[-1]
             dst = f"{dst.rstrip('/')}/{src_name}"
+            # Check again after expansion
+            if src == dst:
+                return self
 
         start, end, _, _ = self._find_node(src)
         node_str = self._data[start:end]
@@ -475,10 +504,17 @@ class Loopy:
         """Copy a node to a new location. If dst is a directory, copies into it."""
         src, dst = self._resolve(src.rstrip("/")), self._resolve(dst.rstrip("/"))
 
+        # cp to self is an error (check before directory expansion)
+        if src == dst:
+            raise ValueError(f"Cannot copy to self: {src}")
+
         # If destination is existing directory, copy INTO it with same name
         if self.exists(dst) and self.isdir(dst):
             src_name = self._normalize_path(src)[-1]
             dst = f"{dst.rstrip('/')}/{src_name}"
+            # Check again after expansion
+            if src == dst:
+                raise ValueError(f"Cannot copy to self: {src}")
 
         start, end, _, _ = self._find_node(src)
         node_str = self._data[start:end]

@@ -304,7 +304,7 @@ class TestEdgeCases:
         """Remove doesn't leave artifacts."""
         tree = Loopy()
         tree.mkdir("/a/b/c", parents=True)
-        tree.rm("/a/b")
+        tree.rm("/a/b", recursive=True)
 
         assert tree.exists("/a")
         assert not tree.exists("/a/b")

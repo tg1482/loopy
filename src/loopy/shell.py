@@ -279,9 +279,20 @@ def _cmd_cp(args: list[str], _stdin: str, tree: Loopy) -> str:
 
 
 def _cmd_rm(args: list[str], _stdin: str, tree: Loopy) -> str:
-    if len(args) != 1:
+    recursive = False
+    path = None
+    for arg in args:
+        if arg in ("-r", "-rf", "--recursive"):
+            recursive = True
+        elif arg.startswith("-"):
+            raise ValueError(f"unknown rm option: {arg}")
+        elif path is None:
+            path = arg
+        else:
+            raise ValueError("rm takes one path")
+    if path is None:
         raise ValueError("rm requires a path")
-    tree.rm(args[0])
+    tree.rm(path, recursive=recursive)
     return ""
 
 
@@ -321,6 +332,60 @@ def _cmd_write(args: list[str], stdin: str, tree: Loopy) -> str:
     return ""
 
 
+def _cmd_sed(args: list[str], _stdin: str, tree: Loopy) -> str:
+    # sed path pattern replacement [-i] [-r] [-c count]
+    ignore_case = False
+    recursive = False
+    count = 0
+    positional = []
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "-i":
+            ignore_case = True
+        elif arg == "-r":
+            recursive = True
+        elif arg == "-c" and i + 1 < len(args):
+            count = int(args[i + 1])
+            i += 1
+        elif arg.startswith("-"):
+            raise ValueError(f"unknown sed option: {arg}")
+        else:
+            positional.append(arg)
+        i += 1
+
+    if len(positional) != 3:
+        raise ValueError("sed requires: path pattern replacement")
+
+    path, pattern, replacement = positional
+    tree.sed(path, pattern, replacement, count=count, ignore_case=ignore_case, recursive=recursive)
+    return ""
+
+
+def _cmd_help(_args: list[str], _stdin: str, _tree: Loopy) -> str:
+    return """Available commands:
+  ls [path]           List directory contents
+  cd <path>           Change directory
+  pwd                 Print working directory
+  cat <path>          Show file contents
+  tree [path]         Show tree structure
+  find [path] [-name pattern] [-type d|f]
+  grep <pattern> [path] [-i] [-v] [-c]
+  du [path] [-c]      Count nodes or content size
+
+  touch <path> [content]   Create file
+  write <path> [content]   Write to file
+  mkdir [-p] <path>        Create directory
+  rm [-r] <path>           Remove file/directory
+  mv <src> <dst>           Move/rename
+  cp <src> <dst>           Copy
+  sed <path> <pattern> <replacement> [-i] [-r] [-c n]
+
+  echo <text>         Print text
+  help                Show this help"""
+
+
 COMMANDS: dict[str, Command] = {
     "ls": _cmd_ls,
     "cat": _cmd_cat,
@@ -337,6 +402,8 @@ COMMANDS: dict[str, Command] = {
     "mkdir": _cmd_mkdir,
     "touch": _cmd_touch,
     "write": _cmd_write,
+    "sed": _cmd_sed,
+    "help": _cmd_help,
 }
 
 

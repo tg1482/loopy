@@ -231,7 +231,7 @@ class TestOperationEdgeCases:
     def test_rm_root_resets_tree(self):
         tree = Loopy()
         tree.touch("/a/b/c", "content")
-        tree.rm("/")
+        tree.rm("/", recursive=True)
 
         assert tree.raw == "<root/>"
         assert tree.ls("/") == []
@@ -281,13 +281,13 @@ class TestOperationEdgeCases:
         with pytest.raises(KeyError):
             tree.cd("/nonexistent")
 
-    def test_write_preserves_children(self):
+    def test_write_on_directory_raises(self):
         tree = Loopy()
         tree.touch("/parent/child", "child content")
-        tree.write("/parent", "parent content")
 
-        assert tree.cat("/parent") == "parent content"
-        assert tree.cat("/parent/child") == "child content"
+        # Writing content to a directory with children is now an error
+        with pytest.raises(IsADirectoryError):
+            tree.write("/parent", "parent content")
 
 
 class TestGrepEdgeCases:
