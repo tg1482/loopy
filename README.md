@@ -69,10 +69,8 @@ tree.mv("/animals/mammals/felines/cat", "/pets/cat")
 ## Install
 
 ```bash
-pip install loopy
-
-# Or just copy - zero dependencies
-curl -O https://raw.githubusercontent.com/tg1482/loopy/main/src/loopy/core.py
+# Local install
+uv pip install -e .
 ```
 
 ## Shell for Agents
@@ -183,9 +181,16 @@ Internally, Loopy stores everything as XML-like tags:
 <root><concepts><ml><supervised>...</supervised></ml></concepts></root>
 ```
 
-- Directories = tags with children or empty: `<ml>...</ml>` or `<empty></empty>`
-- Files = tags with text content: `<regression>predicts continuous</regression>`
-- Content is auto-escaped (`<`, `>`, `&` preserved correctly)
+## Internals
+
+Loopy stores the tree as a small in-memory node graph. The string form is
+generated on demand via `tree.raw` and can be parsed back into the same
+structure. This keeps most operations fast while preserving the single-string
+serialization model.
+
+## Special Characters
+
+Content is automatically XML-escaped:
 
 The entire tree is one string—no parsing into objects, no hidden state.
 

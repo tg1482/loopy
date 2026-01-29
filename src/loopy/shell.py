@@ -6,7 +6,7 @@ import re
 import shlex
 from typing import Callable
 
-from .core import Loopy
+from .core_v2 import Loopy
 
 
 Command = Callable[[list[str], str, Loopy], str]
@@ -359,8 +359,23 @@ def _cmd_sed(args: list[str], _stdin: str, tree: Loopy) -> str:
         raise ValueError("sed requires: path pattern replacement")
 
     path, pattern, replacement = positional
-    tree.sed(path, pattern, replacement, count=count, ignore_case=ignore_case, recursive=recursive)
+    tree.sed(
+        path,
+        pattern,
+        replacement,
+        count=count,
+        ignore_case=ignore_case,
+        recursive=recursive,
+    )
     return ""
+
+
+def _cmd_info(args: list[str], _stdin: str, tree: Loopy) -> str:
+    if len(args) > 1:
+        raise ValueError("info takes at most one path")
+    path = args[0] if args else "."
+    info = tree.info(path)
+    return "\n".join(f"{key}: {value}" for key, value in info.items())
 
 
 def _cmd_help(_args: list[str], _stdin: str, _tree: Loopy) -> str:
@@ -368,6 +383,7 @@ def _cmd_help(_args: list[str], _stdin: str, _tree: Loopy) -> str:
   ls [path]           List directory contents
   cd <path>           Change directory
   pwd                 Print working directory
+  info [path]         Show node metadata
   cat <path>          Show file contents
   tree [path]         Show tree structure
   find [path] [-name regex] [-type d|f]
@@ -404,6 +420,7 @@ COMMANDS: dict[str, Command] = {
     "write": _cmd_write,
     "sed": _cmd_sed,
     "help": _cmd_help,
+    "info": _cmd_info,
 }
 
 

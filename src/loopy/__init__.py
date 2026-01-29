@@ -12,7 +12,7 @@ Usage:
     tree.grep("mam")  # -> ["/animals/mammals"]
 """
 
-from .core import Loopy
+from .core_v2 import Loopy
 
 __version__ = "0.1.0"
 __all__ = ["Loopy"]
