@@ -21,7 +21,7 @@ print(tree.tree())
 #         └── persian: fluffy
 
 print(tree.raw)
-# <root><animals><dogs><labrador>friendly, golden</labrador></dogs><cats><persian>fluffy</persian></cats></animals></root>
+# <root><animals><dogs><labrador>friendly, golden</labrador></dogs>...</root>
 ```
 
 ## Why?
@@ -33,11 +33,13 @@ print(tree.raw)
 ## Install
 
 ```bash
-# It's a single file, just copy it
-curl -O https://raw.githubusercontent.com/yourname/loopy/main/loopy.py
+# Single file, no dependencies - just copy it
+cp loopy.py /your/project/
 ```
 
 ## API
+
+### Core Operations
 
 | Operation | Example |
 |-----------|---------|
@@ -49,32 +51,76 @@ curl -O https://raw.githubusercontent.com/yourname/loopy/main/loopy.py
 | `mv(src, dst)` | `tree.mv("/old", "/new")` |
 | `cp(src, dst)` | `tree.cp("/a", "/b")` |
 | `exists(path)` | `tree.exists("/a")` → `True` |
+
+### Search & Transform
+
+| Operation | Example |
+|-----------|---------|
 | `grep(pattern)` | `tree.grep("dog")` → `["/animals/dogs"]` |
 | `sed(path, pat, repl)` | `tree.sed("/file", "old", "new")` |
 | `glob(pattern)` | `tree.glob("/**/*.py")` |
 | `find(path, name, type)` | `tree.find("/", type="f")` |
-| `tree()` | Pretty print |
-| `.raw` | Get the underlying string |
+
+### Navigation
+
+| Operation | Example |
+|-----------|---------|
+| `cd(path)` | `tree.cd("/project")` |
+| `.cwd` | `tree.cwd` → `"/project"` |
+
+### Inspection
+
+| Operation | Example |
+|-----------|---------|
+| `tree()` | Pretty print from cwd |
+| `du(path)` | Node count |
+| `info(path)` | Metadata dict |
+| `head(path, n)` | First n chars |
+| `tail(path, n)` | Last n chars |
+| `isdir(path)` | Has children? |
+| `isfile(path)` | Leaf node? |
+| `walk(path)` | os.walk() style |
+| `.raw` | The underlying string |
 
 All mutating operations return `self` for chaining.
 
-## Advanced
+## Relative Paths & cd
 
 ```python
-# grep options
+tree = (
+    Loopy()
+    .mkdir("/projects/webapp/src", parents=True)
+    .cd("/projects/webapp")      # change directory
+    .touch("README.md", "# App") # relative path
+    .touch("src/main.py", "...")
+    .cd("src")                   # relative cd
+    .touch("util.py", "...")
+)
+
+tree.cwd        # "/projects/webapp/src"
+tree.ls()       # ["main.py", "util.py"] - lists cwd
+tree.ls(".")    # same as above
+tree.ls("/")    # absolute - always root
+```
+
+## Advanced Options
+
+```python
+# grep
 tree.grep("error", content=True, ignore_case=True, invert=True, count=True)
 
-# sed options
-tree.sed("/logs", "foo", "bar", recursive=True, count=1)
+# sed
+tree.sed("/logs", "foo", "bar", recursive=True, count=1, ignore_case=True)
 
-# find by type
+# find
 tree.find("/", type="d")  # directories only
 tree.find("/", type="f")  # files (leaves) only
+tree.find("/", name=r"test_.*")  # regex match
 
-# stats
-tree.du("/")                    # node count
-tree.du("/", content_size=True) # total bytes
-tree.info("/path")              # metadata dict
+# glob patterns
+tree.glob("/**/*.py")     # recursive
+tree.glob("/src/*.js")    # single level
+tree.glob("/config/??.json")  # ? = single char
 ```
 
 ## Serialization
@@ -85,6 +131,19 @@ db.store("knowledge", tree.raw)
 
 # Load
 tree = Loopy(db.get("knowledge"))
+
+# Or initialize with existing XML-like data
+tree = Loopy("<root><users><alice>admin</alice></users></root>")
+tree.cat("/users/alice")  # "admin"
+```
+
+## Special Characters
+
+Content is automatically XML-escaped:
+
+```python
+tree.touch("/code", "if (a < b && c > d) { ... }")
+tree.cat("/code")  # "if (a < b && c > d) { ... }" - preserved correctly
 ```
 
 ## License

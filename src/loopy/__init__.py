@@ -2,6 +2,8 @@
 Loopy - A filesystem-like API over a tree stored as a string.
 
 Usage:
+    from loopy import Loopy
+
     tree = Loopy()
     tree.mkdir("/animals/mammals", parents=True)
     tree.touch("/animals/mammals/dog", "golden retriever")
@@ -9,6 +11,9 @@ Usage:
     tree.ls("/animals")  # -> ["mammals"]
     tree.grep("mam")  # -> ["/animals/mammals"]
 """
+
+__version__ = "0.1.0"
+__all__ = ["Loopy"]
 
 import re
 from typing import Optional
