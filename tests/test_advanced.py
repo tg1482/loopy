@@ -499,6 +499,28 @@ class TestCd:
         assert tree.ls(".") == tree.ls()
         assert tree.tree(".") == tree.tree()
 
+    def test_parent_path_dotdot(self):
+        tree = Loopy()
+        tree.mkdir("/a/b/c", parents=True)
+        tree.touch("/a/sibling", "data")
+        tree.cd("/a/b/c")
+
+        # ".." should navigate to parent
+        assert tree.ls("..") == ["c"]  # /a/b contains c
+        assert tree.ls("../..") == ["b", "sibling"]  # /a contains b and sibling
+        assert tree.cat("../../sibling") == "data"
+
+        # cd with ..
+        tree.cd("..")
+        assert tree.cwd == "/a/b"
+        tree.cd("..")
+        assert tree.cwd == "/a"
+
+        # .. at root stays at root
+        tree.cd("/")
+        tree.cd("..")
+        assert tree.cwd == "/"
+
 
 class TestHeadTail:
     """Test head/tail operations."""

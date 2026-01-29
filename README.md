@@ -137,6 +137,25 @@ tree = Loopy("<root><users><alice>admin</alice></users></root>")
 tree.cat("/users/alice")  # "admin"
 ```
 
+## Text Shell (Pipes)
+
+Loopy includes a small text command runner that supports pipes. The shell is a
+thin boundary: commands return text, and pipelines pass stdout to stdin.
+
+```python
+from loopy import Loopy
+from loopy.shell import run
+
+tree = (
+    Loopy()
+    .mkdir("/animals/dogs", parents=True)
+    .touch("/animals/dogs/lab", "friendly")
+)
+
+print(run("ls /animals | grep dog", tree))
+print(run("cat /animals/dogs/lab | grep friend", tree))
+```
+
 ## Special Characters
 
 Content is automatically XML-escaped:

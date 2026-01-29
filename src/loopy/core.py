@@ -3,6 +3,9 @@
 import re
 from typing import Optional
 
+# Regex pattern for valid tag names (alphanumeric, underscore, hyphen, dot)
+TAG_NAME = r"[\w.\-]+"
+
 
 def _escape(text: str) -> str:
     """Escape special characters for storage."""
@@ -12,6 +15,29 @@ def _escape(text: str) -> str:
 def _unescape(text: str) -> str:
     """Unescape special characters when reading."""
     return text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+
+
+def _skip_tag(content: str, tag_name: str, start: int) -> int:
+    """
+    Skip past a tag and its contents, handling nesting.
+    Returns position after the closing tag (or after /> for self-closing).
+    """
+    close_tag = f"</{tag_name}>"
+    depth = 1
+    pos = start
+    while depth > 0 and pos < len(content):
+        next_open = re.search(rf"<{re.escape(tag_name)}(/?>)", content[pos:])
+        next_close = content.find(close_tag, pos)
+        if next_close == -1:
+            return len(content)
+        if next_open and pos + next_open.start() < next_close:
+            if next_open.group(1) != "/>":
+                depth += 1
+            pos = pos + next_open.end()
+        else:
+            depth -= 1
+            pos = next_close + len(close_tag)
+    return pos
 
 
 class Loopy:
@@ -27,21 +53,35 @@ class Loopy:
         return self._cwd
 
     def _resolve(self, path: str) -> str:
-        """Resolve path relative to cwd. Use '.' for current directory."""
+        """Resolve path relative to cwd. Supports '.' and '..' components."""
         if not path or path == ".":
             return self._cwd
         if path.startswith("/"):
-            return path  # Absolute path
-        # Relative path - join with cwd
-        if self._cwd == "/":
-            return f"/{path}"
-        return f"{self._cwd}/{path}"
+            full = path
+        elif self._cwd == "/":
+            full = f"/{path}"
+        else:
+            full = f"{self._cwd}/{path}"
+
+        # Resolve . and .. components
+        parts = []
+        for seg in full.split("/"):
+            if seg == "" or seg == ".":
+                continue
+            elif seg == "..":
+                if parts:
+                    parts.pop()
+            else:
+                parts.append(seg)
+        return "/" + "/".join(parts) if parts else "/"
 
     def cd(self, path: str = "/") -> "Loopy":
         """Change working directory. Returns self for chaining."""
         resolved = self._resolve(path)
         if not self.exists(resolved):
             raise KeyError(f"Path does not exist: {resolved}")
+        if not self.isdir(resolved):
+            raise NotADirectoryError(f"Not a directory: {resolved}")
         self._cwd = resolved
         return self
 
@@ -86,31 +126,75 @@ class Loopy:
                     return m.start(), end + 7, True, self._data[m.end():end]
             raise KeyError(path)
 
-        # Search within bounds (start with full string, narrow down)
-        search_start = 0
-        search_end = len(self._data)
+        # Start search from within root's content
+        root_match = re.search(r"<root(/?>)", self._data)
+        if not root_match:
+            raise KeyError(path)
+        if root_match.group(1) == "/>":
+            raise KeyError(path)  # Root is empty, can't find anything
+        root_end = self._data.find("</root>")
+        search_start = root_match.end()
+        search_end = root_end
 
         for i, seg in enumerate(segments):
-            # Look for self-closing or opening tag within current bounds
-            pattern = rf"<({re.escape(seg)})(/?>)"
+            # Look for self-closing or opening tag - but only DIRECT children
             search_region = self._data[search_start:search_end]
-            match = re.search(pattern, search_region)
+
+            # Find direct child by parsing at current level only
+            match = None
+            pos = 0
+            while pos < len(search_region):
+                tag_match = re.search(rf"<({TAG_NAME})(/?>)", search_region[pos:])
+                if not tag_match:
+                    break
+
+                tag_name = tag_match.group(1)
+                tag_end_type = tag_match.group(2)
+
+                if tag_name == seg:
+                    # Found our segment as a direct child
+                    match = tag_match
+                    match_pos = pos  # Track position for absolute calculation
+                    break
+
+                # Skip this tag (not our target) - need to skip its entire content
+                if tag_end_type == "/>":
+                    pos = pos + tag_match.end()
+                else:
+                    # Find matching close tag
+                    close_tag = f"</{tag_name}>"
+                    depth = 1
+                    scan = pos + tag_match.end()
+                    while depth > 0 and scan < len(search_region):
+                        next_open = re.search(rf"<{re.escape(tag_name)}(/?>)", search_region[scan:])
+                        next_close = search_region.find(close_tag, scan)
+                        if next_close == -1:
+                            break
+                        if next_open and scan + next_open.start() < next_close:
+                            if next_open.group(1) != "/>":
+                                depth += 1
+                            scan = scan + next_open.end()
+                        else:
+                            depth -= 1
+                            scan = next_close + len(close_tag)
+                    pos = scan
+
             if not match:
                 raise KeyError(path)
 
-            abs_start = search_start + match.start()
+            abs_start = search_start + match_pos + match.start()
 
             if match.group(2) == "/>":
                 # Self-closing tag
                 if i == len(segments) - 1:
-                    return abs_start, search_start + match.end(), False, ""
+                    return abs_start, search_start + match_pos + match.end(), False, ""
                 else:
                     raise KeyError(path)  # Can't traverse into self-closing
             else:
                 # Opening tag - find closing
                 close_tag = f"</{seg}>"
                 depth = 1
-                scan_pos = search_start + match.end()
+                scan_pos = search_start + match_pos + match.end()
 
                 while depth > 0:
                     next_open = re.search(rf"<{re.escape(seg)}(/?>)", self._data[scan_pos:search_end])
@@ -127,7 +211,7 @@ class Loopy:
                         depth -= 1
                         if depth == 0:
                             abs_end = next_close + len(close_tag)
-                            content_start = search_start + match.end()
+                            content_start = search_start + match_pos + match.end()
                             content = self._data[content_start:next_close]
 
                             if i == len(segments) - 1:
@@ -146,34 +230,15 @@ class Loopy:
         children = []
         pos = 0
         while pos < len(content):
-            # Match tag names: alphanumeric, underscore, hyphen, dot
-            match = re.search(r"<([\w.\-]+)(/?>)", content[pos:])
+            match = re.search(rf"<({TAG_NAME})(/?>)", content[pos:])
             if not match:
                 break
             name = match.group(1)
             children.append(name)
-
             if match.group(2) == "/>":
                 pos = pos + match.end()
             else:
-                # Find closing tag, accounting for nesting
-                close_tag = f"</{name}>"
-                depth = 1
-                search_pos = pos + match.end()
-                while depth > 0:
-                    next_open = re.search(rf"<{re.escape(name)}(/?>)", content[search_pos:])
-                    next_close = content.find(close_tag, search_pos)
-                    if next_close == -1:
-                        break
-                    if next_open and search_pos + next_open.start() < next_close:
-                        if next_open.group(1) != "/>":
-                            depth += 1
-                        search_pos = search_pos + next_open.end()
-                    else:
-                        depth -= 1
-                        search_pos = next_close + len(close_tag)
-                pos = search_pos
-
+                pos = _skip_tag(content, name, pos + match.end())
         return children
 
     # --- Filesystem Operations ---
@@ -187,13 +252,23 @@ class Loopy:
         except KeyError:
             return False
 
-    def ls(self, path: str = ".") -> list[str]:
-        """List children of a node."""
+    def ls(self, path: str = ".", classify: bool = False) -> list[str]:
+        """List children of a node. Use classify=True to append / to directories (like ls -F)."""
         path = self._resolve(path)
         _, _, has_content, content = self._find_node(path)
         if not has_content:
             return []
-        return self._extract_children(content)
+        children = self._extract_children(content)
+        if classify:
+            result = []
+            for child in children:
+                child_path = f"{path.rstrip('/')}/{child}"
+                if self.isdir(child_path):
+                    result.append(f"{child}/")
+                else:
+                    result.append(child)
+            return result
+        return children
 
     def cat(self, path: str) -> str:
         """Get the text content of a node (excludes child tags)."""
@@ -205,38 +280,15 @@ class Loopy:
         result = []
         pos = 0
         while pos < len(content):
-            # Find next tag (names can have dots, hyphens)
-            tag_match = re.search(r"<([\w.\-]+)(/?>)", content[pos:])
-            if not tag_match:
+            match = re.search(rf"<({TAG_NAME})(/?>)", content[pos:])
+            if not match:
                 result.append(content[pos:])
                 break
-
-            # Add text before the tag
-            result.append(content[pos : pos + tag_match.start()])
-
-            if tag_match.group(2) == "/>":
-                # Self-closing, skip it
-                pos = pos + tag_match.end()
+            result.append(content[pos : pos + match.start()])
+            if match.group(2) == "/>":
+                pos = pos + match.end()
             else:
-                # Find matching close tag
-                tag_name = tag_match.group(1)
-                close_tag = f"</{tag_name}>"
-                depth = 1
-                scan = pos + tag_match.end()
-                while depth > 0 and scan < len(content):
-                    next_open = re.search(rf"<{re.escape(tag_name)}(/?>)", content[scan:])
-                    next_close = content.find(close_tag, scan)
-                    if next_close == -1:
-                        break
-                    if next_open and scan + next_open.start() < next_close:
-                        if next_open.group(1) != "/>":
-                            depth += 1
-                        scan = scan + next_open.end()
-                    else:
-                        depth -= 1
-                        scan = next_close + len(close_tag)
-                pos = scan
-
+                pos = _skip_tag(content, match.group(1), pos + match.end())
         return _unescape("".join(result).strip())
 
     def mkdir(self, path: str, parents: bool = False) -> "Loopy":
@@ -264,18 +316,11 @@ class Loopy:
             parent_path = "/" + "/".join(segments[:-1])
             raise KeyError(f"Parent path does not exist: {parent_path}")
 
-        # Build nested tags for new nodes
-        new_nodes = ""
-        for seg in to_create:
-            new_nodes = f"<{seg}>{new_nodes}</{seg}>" if new_nodes else f"<{seg}/>"
-
-        # Wait, that's backwards. Let me fix:
-        new_nodes = ""
-        for seg in reversed(to_create):
-            if new_nodes:
-                new_nodes = f"<{seg}>{new_nodes}</{seg}>"
-            else:
-                new_nodes = f"<{seg}/>"
+        # Build nested tags for new nodes (innermost first)
+        # Use open/close tags (not self-closing) so directories are distinguishable from files
+        new_nodes = f"<{to_create[-1]}></{to_create[-1]}>"
+        for seg in reversed(to_create[:-1]):
+            new_nodes = f"<{seg}>{new_nodes}</{seg}>"
 
         # Insert into parent
         if existing:
@@ -380,45 +425,25 @@ class Loopy:
 
         start, end, _, _ = self._find_node(path)
         self._data = self._data[:start] + self._data[end:]
-
         return self
 
-    def mv(self, src: str, dst: str) -> "Loopy":
-        """Move a node to a new location."""
-        src = self._resolve(src)
-        dst = self._resolve(dst)
-        # Get source node
-        start, end, _, _ = self._find_node(src)
-        node_str = self._data[start:end]
-
-        # Remove from source
-        self._data = self._data[:start] + self._data[end:]
+    def _insert_node(self, node_str: str, src_name: str, dst: str) -> None:
+        """Insert a node string at destination path, renaming if needed."""
+        dst_segments = self._normalize_path(dst)
+        new_name = dst_segments[-1]
 
         # Ensure destination parent exists
-        dst_segments = self._normalize_path(dst)
         if len(dst_segments) > 1:
             dst_parent = "/" + "/".join(dst_segments[:-1])
             if not self.exists(dst_parent):
                 self.mkdir(dst_parent, parents=True)
 
         # Rename node if needed
-        src_segments = self._normalize_path(src)
-        old_name = src_segments[-1]
-        new_name = dst_segments[-1]
+        if src_name != new_name:
+            node_str = re.sub(rf"^<{re.escape(src_name)}(/?>)", f"<{new_name}\\1", node_str)
+            node_str = re.sub(rf"</{re.escape(src_name)}>$", f"</{new_name}>", node_str)
 
-        if old_name != new_name:
-            node_str = re.sub(
-                rf"^<{re.escape(old_name)}(/?>)",
-                f"<{new_name}\\1",
-                node_str,
-            )
-            node_str = re.sub(
-                rf"</{re.escape(old_name)}>$",
-                f"</{new_name}>",
-                node_str,
-            )
-
-        # Insert at destination
+        # Insert at destination parent
         dst_parent = "/" + "/".join(dst_segments[:-1]) if len(dst_segments) > 1 else "/"
         start, end, has_content, _ = self._find_node(dst_parent)
         parent_name = dst_segments[-2] if len(dst_segments) > 1 else "root"
@@ -427,60 +452,39 @@ class Loopy:
             close_pos = self._data.rfind(f"</{parent_name}>", start, end)
             self._data = self._data[:close_pos] + node_str + self._data[close_pos:]
         else:
-            self._data = (
-                self._data[:start]
-                + f"<{parent_name}>{node_str}</{parent_name}>"
-                + self._data[end:]
-            )
+            self._data = f"{self._data[:start]}<{parent_name}>{node_str}</{parent_name}>{self._data[end:]}"
 
+    def mv(self, src: str, dst: str) -> "Loopy":
+        """Move a node to a new location. If dst is a directory, moves into it."""
+        src, dst = self._resolve(src.rstrip("/")), self._resolve(dst.rstrip("/"))
+
+        # If destination is existing directory, move INTO it with same name
+        if self.exists(dst) and self.isdir(dst):
+            src_name = self._normalize_path(src)[-1]
+            dst = f"{dst.rstrip('/')}/{src_name}"
+
+        start, end, _, _ = self._find_node(src)
+        node_str = self._data[start:end]
+        src_name = self._normalize_path(src)[-1]
+
+        self._data = self._data[:start] + self._data[end:]  # Remove source
+        self._insert_node(node_str, src_name, dst)
         return self
 
     def cp(self, src: str, dst: str) -> "Loopy":
-        """Copy a node to a new location."""
-        src = self._resolve(src)
-        dst = self._resolve(dst)
+        """Copy a node to a new location. If dst is a directory, copies into it."""
+        src, dst = self._resolve(src.rstrip("/")), self._resolve(dst.rstrip("/"))
+
+        # If destination is existing directory, copy INTO it with same name
+        if self.exists(dst) and self.isdir(dst):
+            src_name = self._normalize_path(src)[-1]
+            dst = f"{dst.rstrip('/')}/{src_name}"
+
         start, end, _, _ = self._find_node(src)
         node_str = self._data[start:end]
+        src_name = self._normalize_path(src)[-1]
 
-        # Ensure destination parent exists
-        dst_segments = self._normalize_path(dst)
-        if len(dst_segments) > 1:
-            dst_parent = "/" + "/".join(dst_segments[:-1])
-            if not self.exists(dst_parent):
-                self.mkdir(dst_parent, parents=True)
-
-        # Rename node if needed
-        src_segments = self._normalize_path(src)
-        old_name = src_segments[-1]
-        new_name = dst_segments[-1]
-
-        if old_name != new_name:
-            node_str = re.sub(
-                rf"^<{re.escape(old_name)}(/?>)",
-                f"<{new_name}\\1",
-                node_str,
-            )
-            node_str = re.sub(
-                rf"</{re.escape(old_name)}>$",
-                f"</{new_name}>",
-                node_str,
-            )
-
-        # Insert at destination
-        dst_parent = "/" + "/".join(dst_segments[:-1]) if len(dst_segments) > 1 else "/"
-        start, end, has_content, _ = self._find_node(dst_parent)
-        parent_name = dst_segments[-2] if len(dst_segments) > 1 else "root"
-
-        if has_content:
-            close_pos = self._data.rfind(f"</{parent_name}>", start, end)
-            self._data = self._data[:close_pos] + node_str + self._data[close_pos:]
-        else:
-            self._data = (
-                self._data[:start]
-                + f"<{parent_name}>{node_str}</{parent_name}>"
-                + self._data[end:]
-            )
-
+        self._insert_node(node_str, src_name, dst)
         return self
 
     def grep(
@@ -758,15 +762,27 @@ class Loopy:
         }
 
     def isdir(self, path: str) -> bool:
-        """Check if path is a directory (has children)."""
+        """Check if path is a directory (open/close tag that can contain children)."""
         path = self._resolve(path)
-        if not self.exists(path):
+        try:
+            _, _, has_content, content = self._find_node(path)
+            # Directory = open/close tag with no text content (only children or empty)
+            # Check if any text exists outside of child tags
+            if not has_content:
+                return False  # Self-closing = file
+            text_only = self.cat(path)
+            return not text_only  # Directory if no text content
+        except KeyError:
             return False
-        return len(self.ls(path)) > 0
 
     def isfile(self, path: str) -> bool:
-        """Check if path is a file (leaf node, no children)."""
+        """Check if path is a file (self-closing or has text content)."""
         path = self._resolve(path)
-        if not self.exists(path):
+        try:
+            _, _, has_content, _ = self._find_node(path)
+            if not has_content:
+                return True  # Self-closing = file
+            # Has text content = file (even if it has children)
+            return bool(self.cat(path))
+        except KeyError:
             return False
-        return len(self.ls(path)) == 0
