@@ -370,7 +370,7 @@ def _cmd_help(_args: list[str], _stdin: str, _tree: Loopy) -> str:
   pwd                 Print working directory
   cat <path>          Show file contents
   tree [path]         Show tree structure
-  find [path] [-name pattern] [-type d|f]
+  find [path] [-name regex] [-type d|f]
   grep <pattern> [path] [-i] [-v] [-c]
   du [path] [-c]      Count nodes or content size
 

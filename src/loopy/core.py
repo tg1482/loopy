@@ -328,6 +328,12 @@ class Loopy:
             parent_path = "/" + "/".join(segments[:-1])
             raise KeyError(f"Parent path does not exist: {parent_path}")
 
+        # Check if we're trying to create under a file (has text content)
+        if existing:
+            parent_path = "/" + "/".join(existing)
+            if self.isfile(parent_path):
+                raise NotADirectoryError(f"Cannot create directory under file: {parent_path}")
+
         # Build nested tags for new nodes (innermost first)
         # Use open/close tags (not self-closing) so directories are distinguishable from files
         new_nodes = f"<{to_create[-1]}></{to_create[-1]}>"
@@ -371,11 +377,13 @@ class Loopy:
         if not segments:
             return self
 
-        # Ensure parent exists
+        # Ensure parent exists and is not a file
         if len(segments) > 1:
             parent_path = "/" + "/".join(segments[:-1])
             if not self.exists(parent_path):
                 self.mkdir(parent_path, parents=True)
+            elif self.isfile(parent_path):
+                raise NotADirectoryError(f"Cannot create file under file: {parent_path}")
 
         name = segments[-1]
         if content:

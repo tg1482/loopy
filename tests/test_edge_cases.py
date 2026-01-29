@@ -128,6 +128,24 @@ class TestMvCpEdgeCases:
             tree.cp("/file", "/file")
 
 
+class TestNoCreateUnderFile:
+    """Cannot create files/dirs under files."""
+
+    def test_mkdir_under_file_raises(self):
+        tree = Loopy()
+        tree.touch("/myfile", "content")
+
+        with pytest.raises(NotADirectoryError):
+            tree.mkdir("/myfile/subdir")
+
+    def test_touch_under_file_raises(self):
+        tree = Loopy()
+        tree.touch("/myfile", "content")
+
+        with pytest.raises(NotADirectoryError):
+            tree.touch("/myfile/child", "data")
+
+
 class TestPathNormalization:
     """Path edge cases."""
 
