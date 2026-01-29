@@ -66,6 +66,17 @@ tree.mv("/animals/mammals/canines/dog", "/pets/dog")
 tree.mv("/animals/mammals/felines/cat", "/pets/cat")
 ```
 
+## How it works
+
+Loopy keeps an in-memory node tree and exposes filesystem-like operations. The raw string is generated on demand and can be parsed back into the same structure.
+
+Core principles:
+
+- **String as source of truth**: serialization is a single XML-like string
+- **Nodes are minimal**: name, text, children, parent, self-closing
+- **Filesystem semantics**: paths, mkdir/touch/cat/ls/mv/cp/rm
+- **Pure core**: parsing/emit are deterministic and side-effect free
+
 ## Install
 
 ```bash
@@ -180,13 +191,6 @@ Internally, Loopy stores everything as XML-like tags:
 ```
 <root><concepts><ml><supervised>...</supervised></ml></concepts></root>
 ```
-
-## Internals
-
-Loopy stores the tree as a small in-memory node graph. The string form is
-generated on demand via `tree.raw` and can be parsed back into the same
-structure. This keeps most operations fast while preserving the single-string
-serialization model.
 
 ## Special Characters
 
