@@ -33,8 +33,8 @@ print(tree.raw)
 ## Install
 
 ```bash
-# Single file, no dependencies - just copy it
-cp loopy.py /your/project/
+# Local install
+uv pip install -e .
 ```
 
 ## API
@@ -155,6 +155,13 @@ tree = (
 print(run("ls /animals | grep dog", tree))
 print(run("cat /animals/dogs/lab | grep friend", tree))
 ```
+
+## Internals
+
+Loopy stores the tree as a small in-memory node graph. The string form is
+generated on demand via `tree.raw` and can be parsed back into the same
+structure. This keeps most operations fast while preserving the single-string
+serialization model.
 
 ## Special Characters
 
