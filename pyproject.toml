@@ -1,5 +1,5 @@
 [project]
-name = "loopy"
+name = "loopy-fs"
 version = "0.1.0"
 description = "A filesystem-like API over a tree stored as a string"
 readme = "README.md"
@@ -36,4 +36,5 @@ packages = ["src/loopy"]
 [tool.uv]
 dev-dependencies = [
     "pytest>=8.0.0",
+    "twine>=5.0.0",
 ]

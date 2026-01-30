@@ -29,15 +29,66 @@ def _unescape(text: str) -> str:
 
 @dataclass
 class Node:
+    """A node in the Loopy tree.
+
+    Attributes:
+        name: The node's name (tag name in serialization)
+        text: Text content of the node
+        children: Child nodes
+        parent: Parent node reference
+        self_closing: If True, serializes as <name/> when empty
+        link_target: If set, this node is a symlink pointing to the given path.
+                    Symlinks are always self-closing and have no text/children.
+    """
     name: str
     text: str = ""
     children: list["Node"] = field(default_factory=list)
     parent: Optional["Node"] = None
     self_closing: bool = False
+    link_target: Optional[str] = None
+
+
+def _parse_symlink_attr(token: str) -> tuple[str, Optional[str]]:
+    """Parse a token that may contain a symlink attribute.
+
+    Args:
+        token: The tag token (without < >), e.g., 'name @="/path"/' or 'name'
+
+    Returns:
+        (name, link_target) where link_target is None if not a symlink
+    """
+    # Check for symlink syntax: name @="/path"/
+    if ' @="' not in token:
+        return token, None
+
+    # Extract name and link target
+    space_idx = token.index(' @="')
+    name = token[:space_idx]
+
+    # Find the closing quote
+    quote_start = space_idx + 4  # len(' @="')
+    quote_end = token.find('"', quote_start)
+    if quote_end == -1:
+        raise ValueError(f"Malformed symlink: missing closing quote in {token!r}")
+
+    link_target = token[quote_start:quote_end]
+
+    # Unescape the link target (it may contain escaped characters)
+    link_target = _unescape(link_target)
+
+    # The rest should be just "/" for self-closing
+    remainder = token[quote_end + 1:]
+    if remainder != "/":
+        raise ValueError(f"Symlinks must be self-closing: {token!r}")
+
+    return name, link_target
 
 
 def parse(data: str) -> Node:
-    """Parse raw loopy data into a Node tree."""
+    """Parse raw loopy data into a Node tree.
+
+    Supports symlink syntax: <name @="/target/path"/>
+    """
     if not data:
         data = "<root/>"
 
@@ -71,19 +122,39 @@ def parse(data: str) -> Node:
             if not stack:
                 root = node
         else:
-            self_closing = token.endswith("/")
-            name = token[:-1] if self_closing else token
-            if not _TAG_NAME_RE.match(name):
-                raise ValueError(f"Invalid tag name: {name!r}")
-            parent = stack[-1] if stack else None
-            node = Node(name=name, parent=parent, self_closing=self_closing)
-            if parent:
-                parent.children.append(node)
-            if self_closing:
+            # Check for symlink syntax first
+            name, link_target = _parse_symlink_attr(token)
+
+            if link_target is not None:
+                # It's a symlink - always self-closing
+                if not _TAG_NAME_RE.match(name):
+                    raise ValueError(f"Invalid tag name: {name!r}")
+                parent = stack[-1] if stack else None
+                node = Node(
+                    name=name,
+                    parent=parent,
+                    self_closing=True,
+                    link_target=link_target
+                )
+                if parent:
+                    parent.children.append(node)
                 if not stack:
                     root = node
             else:
-                stack.append(node)
+                # Regular node
+                self_closing = token.endswith("/")
+                name = token[:-1] if self_closing else token
+                if not _TAG_NAME_RE.match(name):
+                    raise ValueError(f"Invalid tag name: {name!r}")
+                parent = stack[-1] if stack else None
+                node = Node(name=name, parent=parent, self_closing=self_closing)
+                if parent:
+                    parent.children.append(node)
+                if self_closing:
+                    if not stack:
+                        root = node
+                else:
+                    stack.append(node)
 
         pos = end + 1
 
@@ -95,7 +166,16 @@ def parse(data: str) -> Node:
 
 
 def emit(node: Node) -> str:
-    """Serialize a Node tree to raw loopy data."""
+    """Serialize a Node tree to raw loopy data.
+
+    Symlinks are serialized as: <name @="/target/path"/>
+    """
+    # Handle symlinks first - they're always self-closing with the @ attribute
+    if node.link_target is not None:
+        # Escape special characters in the link target
+        escaped_target = _escape(node.link_target)
+        return f'<{node.name} @="{escaped_target}"/>'
+
     if node.self_closing and not node.children and not node.text:
         return f"<{node.name}/>"
 
@@ -198,6 +278,34 @@ class Loopy:
     def _cat_node(self, node: Node) -> str:
         return node.text.strip()
 
+    def _resolve_through_links(self, path: str, seen: Optional[set] = None) -> Node:
+        """Resolve a path, following any symlinks to the final target.
+
+        Args:
+            path: The path to resolve
+            seen: Set of already-visited paths (for cycle detection)
+
+        Returns:
+            The final target Node after following all symlinks
+
+        Raises:
+            KeyError: If path or any link target doesn't exist
+            ValueError: If a symlink cycle is detected
+        """
+        if seen is None:
+            seen = set()
+
+        path = self._resolve(path)
+        if path in seen:
+            raise ValueError(f"Symlink cycle detected: {path}")
+        seen.add(path)
+
+        node = self._get_node(path)
+        if node.link_target is not None:
+            # It's a symlink - follow it
+            return self._resolve_through_links(node.link_target, seen)
+        return node
+
     def _is_dir_node(self, node: Node) -> bool:
         if node.self_closing:
             return False
@@ -234,26 +342,57 @@ class Loopy:
         except KeyError:
             return False
 
-    def ls(self, path: str = ".", classify: bool = False) -> list[str]:
-        """List children of a node. Use classify=True to append / to directories (like ls -F)."""
+    def ls(
+        self, path: str = ".", classify: bool = False, follow_links: bool = True
+    ) -> list[str]:
+        """List children of a node.
+
+        Args:
+            path: Path to list
+            classify: If True, append / to directories, @ to symlinks (like ls -F)
+            follow_links: If True (default), follow symlinks to directories
+
+        Returns:
+            List of child names, optionally with type suffixes
+        """
         path = self._resolve(path)
         node = self._get_node(path)
+
+        # If this is a symlink to a directory, list the target's children
+        if follow_links and node.link_target is not None:
+            node = self._resolve_through_links(path)
+
         if not node.children:
             return []
         if not classify:
             return [child.name for child in node.children]
+
         result = []
         for child in node.children:
-            if self._is_dir_node(child):
+            if child.link_target is not None:
+                # Symlink - append @
+                result.append(f"{child.name}@")
+            elif self._is_dir_node(child):
                 result.append(f"{child.name}/")
             else:
                 result.append(child.name)
         return result
 
-    def cat(self, path: str) -> str:
-        """Get the text content of a node (excludes child tags)."""
+    def cat(self, path: str, follow_links: bool = True) -> str:
+        """Get the text content of a node (excludes child tags).
+
+        Args:
+            path: Path to the node
+            follow_links: If True (default), follow symlinks to get target's content
+
+        Returns:
+            The text content of the node (or link target if following links)
+        """
         path = self._resolve(path)
-        node = self._get_node(path)
+        if follow_links:
+            node = self._resolve_through_links(path)
+        else:
+            node = self._get_node(path)
         return self._cat_node(node)
 
     def mkdir(self, path: str, parents: bool = False) -> "Loopy":
@@ -333,16 +472,92 @@ class Loopy:
         self._mark_dirty()
         return self
 
-    def write(self, path: str, content: str) -> "Loopy":
-        """Write/overwrite content to a node. Raises IsADirectoryError for directories."""
+    def ln(self, source: str, dest: str) -> "Loopy":
+        """Create a symbolic link at dest pointing to source.
+
+        Args:
+            source: The target path the link will point to (doesn't need to exist)
+            dest: The path where the symlink will be created
+
+        Behavior:
+            - If dest is an existing directory, create link inside it with source's basename
+            - Source doesn't need to exist (dangling links allowed, like Unix)
+            - If dest already exists as a file/link, raises FileExistsError
+
+        Returns:
+            self for chaining
+        """
+        source = self._resolve(source)
+        dest = self._resolve(dest)
+
+        # If dest is a directory, create link inside it
+        if self.exists(dest) and self.isdir(dest):
+            source_name = self._normalize_path(source)[-1]
+            dest = f"{dest.rstrip('/')}/{source_name}"
+
+        # Check if dest already exists
+        if self.exists(dest):
+            raise FileExistsError(f"Path already exists: {dest}")
+
+        # Get dest segments and ensure parent exists
+        segments = self._normalize_path(dest)
+        if not segments:
+            raise ValueError("Cannot create symlink at root")
+
+        if len(segments) > 1:
+            parent_path = "/" + "/".join(segments[:-1])
+            if not self.exists(parent_path):
+                self.mkdir(parent_path, parents=True)
+            else:
+                parent_node = self._get_node(parent_path)
+                if self._is_file_node(parent_node) and not self.islink(parent_path):
+                    raise NotADirectoryError(
+                        f"Cannot create symlink under file: {parent_path}"
+                    )
+
+        parent_path = "/" + "/".join(segments[:-1]) if len(segments) > 1 else "/"
+        parent_node = self._get_node(parent_path)
+        name = segments[-1]
+
+        # Create the symlink node
+        new_node = Node(
+            name=name,
+            parent=parent_node,
+            self_closing=True,
+            link_target=source,
+        )
+        parent_node.children.append(new_node)
+        parent_node.self_closing = False
+        self._mark_dirty()
+        return self
+
+    def write(self, path: str, content: str, follow_links: bool = True) -> "Loopy":
+        """Write/overwrite content to a node.
+
+        Args:
+            path: Path to write to
+            content: Content to write
+            follow_links: If True (default), follow symlinks and write to target
+
+        Raises:
+            IsADirectoryError: If path is a directory
+            KeyError: If path doesn't exist (will create via touch)
+        """
         path = self._resolve(path)
         try:
-            node = self._get_node(path)
+            if follow_links:
+                node = self._resolve_through_links(path)
+            else:
+                node = self._get_node(path)
         except KeyError:
             return self.touch(path, content)
 
         if node.children:
             raise IsADirectoryError(f"Cannot write content to directory: {path}")
+
+        # Don't write to a symlink node itself
+        if node.link_target is not None:
+            raise ValueError(f"Cannot write to symlink without following: {path}")
 
         node.text = content
         node.self_closing = False
@@ -350,7 +565,10 @@ class Loopy:
         return self
 
     def rm(self, path: str, recursive: bool = False) -> "Loopy":
-        """Remove a node. Use recursive=True for non-empty directories."""
+        """Remove a node. Use recursive=True for non-empty directories.
+
+        Note: Removing a symlink removes the link itself, not the target.
+        """
         path = self._resolve(path)
         if path == "/" or not path:
             if not recursive:
@@ -380,11 +598,16 @@ class Loopy:
         return self
 
     def _clone_node(self, node: Node, parent: Optional[Node] = None) -> Node:
+        """Clone a node and all its children.
+
+        Symlinks are cloned as symlinks (pointing to the same target).
+        """
         clone = Node(
             name=node.name,
             parent=parent,
             text=node.text,
             self_closing=node.self_closing,
+            link_target=node.link_target,  # Preserve symlink target
         )
         for child in node.children:
             clone_child = self._clone_node(child, parent=clone)
@@ -411,7 +634,10 @@ class Loopy:
         parent_node.self_closing = False
 
     def mv(self, src: str, dst: str) -> "Loopy":
-        """Move a node to a new location. If dst is a directory, moves into it."""
+        """Move a node to a new location. If dst is a directory, moves into it.
+
+        Note: Moving a symlink moves the link itself, not the target.
+        """
         src, dst = self._resolve(src.rstrip("/")), self._resolve(dst.rstrip("/"))
 
         if src == dst:
@@ -438,7 +664,10 @@ class Loopy:
         return self
 
     def cp(self, src: str, dst: str) -> "Loopy":
-        """Copy a node to a new location. If dst is a directory, copies into it."""
+        """Copy a node to a new location. If dst is a directory, copies into it.
+
+        Note: Copying a symlink creates a new symlink pointing to the same target.
+        """
         src, dst = self._resolve(src.rstrip("/")), self._resolve(dst.rstrip("/"))
 
         if src == dst:
@@ -554,7 +783,10 @@ class Loopy:
         return self
 
     def tree(self, path: str = ".") -> str:
-        """Return a tree visualization."""
+        """Return a tree visualization.
+
+        Symlinks are shown with ` -> /target/path` suffix (like ls -l).
+        """
         path = self._resolve(path)
         node = self._get_node(path)
         lines: list[str] = []
@@ -573,12 +805,16 @@ class Loopy:
             else:
                 connector = "└── " if is_last else "├── "
 
-            content = self._cat_node(current_node)
-            if content:
-                preview = f"{content[:50]}{'...' if len(content) > 50 else ''}"
-                lines.append(f"{prefix}{connector}{name}: {preview}")
+            # Handle symlinks specially
+            if current_node.link_target is not None:
+                lines.append(f"{prefix}{connector}{name} -> {current_node.link_target}")
             else:
-                lines.append(f"{prefix}{connector}{name}/")
+                content = self._cat_node(current_node)
+                if content:
+                    preview = f"{content[:50]}{'...' if len(content) > 50 else ''}"
+                    lines.append(f"{prefix}{connector}{name}: {preview}")
+                else:
+                    lines.append(f"{prefix}{connector}{name}/")
 
             children = current_node.children
             for i, child in enumerate(children):
@@ -601,7 +837,9 @@ class Loopy:
         Args:
             path: Starting path
             name: Regex pattern to match node names
-            type: 'd' for directories (nodes with children), 'f' for files (leaf nodes)
+            type: 'd' for directories, 'f' for files, 'l' for symlinks
+
+        Note: type checks the node's own type, not the target type for symlinks.
         """
         path = self._resolve(path)
         start = self._get_node(path)
@@ -611,13 +849,19 @@ class Loopy:
         def _walk(node: Node, current_path: str) -> None:
             node_name = "root" if current_path == "/" else node.name
             children = node.children
-            is_dir = len(children) > 0
+            is_link = node.link_target is not None
+            is_dir = len(children) > 0 and not is_link
 
-            if type == "d" and not is_dir:
-                pass
-            elif type == "f" and is_dir:
-                pass
-            elif pattern is None or pattern.search(node_name):
+            # Type filtering
+            type_matches = True
+            if type == "l":
+                type_matches = is_link
+            elif type == "d":
+                type_matches = is_dir
+            elif type == "f":
+                type_matches = not is_dir and not is_link
+
+            if type_matches and (pattern is None or pattern.search(node_name)):
                 results.append(current_path)
 
             for child in children:
@@ -719,38 +963,150 @@ class Loopy:
         _walk(start)
         return total
 
-    def info(self, path: str = ".") -> dict:
-        """Get metadata about a node."""
+    def info(self, path: str = ".", follow_links: bool = True) -> dict:
+        """Get metadata about a node.
+
+        Args:
+            path: Path to the node
+            follow_links: If True (default), info reflects the target for symlinks
+
+        Returns:
+            Dict with name, path, type, is_link, link_target, children_count,
+            content_length, has_content
+        """
         path = self._resolve(path)
         node = self._get_node(path)
-        children = self.ls(path)
-        text_content = self._cat_node(node)
         segments = self._normalize_path(path)
         name = segments[-1] if segments else "root"
+
+        is_link = node.link_target is not None
+        link_target = node.link_target
+
+        # For type and content info, optionally follow the link
+        if follow_links and is_link:
+            try:
+                target_node = self._resolve_through_links(path)
+                children = target_node.children
+                text_content = self._cat_node(target_node)
+            except (KeyError, ValueError):
+                # Dangling or circular link
+                children = []
+                text_content = ""
+        else:
+            children = node.children
+            text_content = self._cat_node(node)
+
+        if is_link:
+            node_type = "link"
+        elif children:
+            node_type = "directory"
+        else:
+            node_type = "file"
 
         return {
             "name": name,
             "path": path,
-            "type": "directory" if children else "file",
+            "type": node_type,
+            "is_link": is_link,
+            "link_target": link_target,
             "children_count": len(children),
             "content_length": len(text_content),
             "has_content": bool(text_content),
         }
 
-    def isdir(self, path: str) -> bool:
-        """Check if path is a directory (open/close tag that can contain children)."""
+    def isdir(self, path: str, follow_links: bool = True) -> bool:
+        """Check if path is a directory.
+
+        Args:
+            path: Path to check
+            follow_links: If True (default), follow symlinks to check target type
+
+        Returns:
+            True if path is a directory (or symlink to directory if following).
+            Returns False for symlinks when follow_links=False.
+        """
+        path = self._resolve(path)
+        try:
+            if follow_links:
+                node = self._resolve_through_links(path)
+            else:
+                node = self._get_node(path)
+                # If not following links, symlinks are not dirs
+                if node.link_target is not None:
+                    return False
+            return self._is_dir_node(node)
+        except (KeyError, ValueError):
+            return False
+
+    def isfile(self, path: str, follow_links: bool = True) -> bool:
+        """Check if path is a file.
+
+        Args:
+            path: Path to check
+            follow_links: If True (default), follow symlinks to check target type
+
+        Returns:
+            True if path is a file (or symlink to file if following).
+            Returns False for symlinks when follow_links=False.
+        """
+        path = self._resolve(path)
+        try:
+            if follow_links:
+                node = self._resolve_through_links(path)
+            else:
+                node = self._get_node(path)
+                # If not following links, symlinks are not files
+                if node.link_target is not None:
+                    return False
+            return self._is_file_node(node)
+        except (KeyError, ValueError):
+            return False
+
+    def islink(self, path: str) -> bool:
+        """Check if path is a symbolic link."""
         path = self._resolve(path)
         try:
             node = self._get_node(path)
-            return self._is_dir_node(node)
+            return node.link_target is not None
         except KeyError:
             return False
 
-    def isfile(self, path: str) -> bool:
-        """Check if path is a file (self-closing or has text content)."""
+    def readlink(self, path: str) -> str:
+        """Return the target of a symbolic link.
+
+        Args:
+            path: Path to the symlink
+
+        Returns:
+            The target path the symlink points to
+
+        Raises:
+            KeyError: If path doesn't exist
+            ValueError: If path is not a symlink
+        """
         path = self._resolve(path)
-        try:
-            node = self._get_node(path)
-            return self._is_file_node(node)
-        except KeyError:
-            return False
+        node = self._get_node(path)
+        if node.link_target is None:
+            raise ValueError(f"Not a symlink: {path}")
+        return node.link_target
+
+    def backlinks(self, path: str) -> list[str]:
+        """Find all symlinks that point to the given path.
+
+        Args:
+            path: The target path to search for
+
+        Returns:
+            List of paths that are symlinks pointing to the given path
+        """
+        path = self._resolve(path)
+        results: list[str] = []
+
+        def _walk(node: Node, current_path: str) -> None:
+            if node.link_target == path:
+                results.append(current_path)
+            for child in node.children:
+                _walk(child, self._child_path(current_path, child.name))
+
+        _walk(self._root, "/")
+        return results

@@ -1129,3 +1129,173 @@ def test_readme_shell_example_echo_pipe():
 
     run("echo 'neural network model' | touch /ml/deep_learning", tree)
     assert tree.cat("/ml/deep_learning") == "neural network model"
+
+
+# ============================================================================
+# Command Chaining Tests
+# ============================================================================
+
+
+def test_semicolon_chaining():
+    """Test ; runs commands sequentially."""
+    tree = Loopy()
+    run("mkdir -p /a ; touch /a/file content", tree)
+    assert tree.exists("/a/file")
+    assert tree.cat("/a/file") == "content"
+
+
+def test_semicolon_multiple_commands():
+    """Test multiple ; separated commands."""
+    tree = Loopy()
+    run("mkdir /a ; mkdir /b ; mkdir /c", tree)
+    assert tree.exists("/a")
+    assert tree.exists("/b")
+    assert tree.exists("/c")
+
+
+def test_semicolon_continues_on_failure():
+    """Test ; continues even when a command fails."""
+    tree = Loopy()
+    tree.mkdir("/exists")
+    # First command fails (cat nonexistent), but second should still run
+    run("cat /nonexistent ; touch /exists/file ok", tree)
+    assert tree.exists("/exists/file")
+    assert tree.cat("/exists/file") == "ok"
+
+
+def test_and_and_chaining():
+    """Test && runs commands sequentially."""
+    tree = Loopy()
+    run("mkdir -p /a && touch /a/file content", tree)
+    assert tree.exists("/a/file")
+    assert tree.cat("/a/file") == "content"
+
+
+def test_and_and_stops_on_failure():
+    """Test && stops on first failure."""
+    tree = Loopy()
+    tree.mkdir("/exists")
+    # First command fails, second should NOT run
+    with pytest.raises(KeyError):
+        run("cat /nonexistent && touch /exists/file", tree)
+    assert not tree.exists("/exists/file")
+
+
+def test_mixed_chaining():
+    """Test mixing ; and && in same command."""
+    tree = Loopy()
+    run("mkdir /a ; mkdir /b && touch /b/file content", tree)
+    assert tree.exists("/a")
+    assert tree.exists("/b/file")
+
+
+def test_chaining_with_pipes():
+    """Test command chains work with pipes."""
+    tree = Loopy()
+    run("mkdir -p /data ; echo 'hello world' | touch /data/msg", tree)
+    assert tree.cat("/data/msg") == "hello world"
+
+
+def test_chaining_in_quotes_not_split():
+    """Test ; and && inside quotes are not treated as separators."""
+    tree = Loopy()
+    run("touch /file 'a ; b && c'", tree)
+    assert tree.cat("/file") == "a ; b && c"
+
+
+# ============================================================================
+# Symlink Shell Command Tests
+# ============================================================================
+
+
+def test_ln_command():
+    """Test ln creates symlinks."""
+    tree = Loopy()
+    run("touch /target content", tree)
+    run("ln /target /link", tree)
+    assert tree.islink("/link")
+    assert tree.cat("/link") == "content"
+
+
+def test_readlink_command():
+    """Test readlink shows symlink target."""
+    tree = Loopy()
+    run("touch /target content", tree)
+    run("ln /target /link", tree)
+    out = run("readlink /link", tree)
+    assert out == "/target"
+
+
+def test_ln_into_directory():
+    """Test ln into existing directory."""
+    tree = Loopy()
+    run("touch /file content", tree)
+    run("mkdir /dir", tree)
+    run("ln /file /dir", tree)
+    assert tree.islink("/dir/file")
+
+
+# ============================================================================
+# Command Chaining Edge Cases
+# ============================================================================
+
+
+class TestCommandChainingEdgeCases:
+    """Edge cases for ; and && command chaining."""
+
+    def test_empty_command_errors(self):
+        """Empty commands should error."""
+        tree = Loopy()
+        with pytest.raises(ValueError, match="empty command"):
+            run("; mkdir /a", tree)
+        with pytest.raises(ValueError, match="trailing"):
+            run("mkdir /a ;", tree)
+
+    def test_and_and_failure_stops_chain(self):
+        """&& chain stops at failure, doesn't run subsequent commands."""
+        tree = Loopy()
+        with pytest.raises(KeyError):
+            run("mkdir /a && cat /nonexistent && mkdir /b", tree)
+        assert tree.exists("/a")
+        assert not tree.exists("/b")
+
+    def test_semicolon_continues_past_failure(self):
+        """Semicolon chain continues past failures."""
+        tree = Loopy()
+        run("mkdir /a ; cat /nonexistent ; mkdir /b", tree)
+        assert tree.exists("/a")
+        assert tree.exists("/b")
+
+    def test_mixed_operators(self):
+        """; and && can be mixed."""
+        tree = Loopy()
+        run("mkdir /a ; mkdir /b && touch /b/file ok", tree)
+        assert tree.exists("/a")
+        assert tree.exists("/b/file")
+
+    def test_pipes_higher_precedence(self):
+        """Pipes bind tighter than ; and &&."""
+        tree = Loopy()
+        tree.touch("/data", "alpha\nbeta")
+        run("cat /data | grep alpha && mkdir /found", tree)
+        assert tree.exists("/found")
+
+    def test_operators_in_quotes_are_literal(self):
+        """Operators inside quotes are not parsed."""
+        tree = Loopy()
+        run("touch /f 'a ; b && c | d'", tree)
+        assert tree.cat("/f") == "a ; b && c | d"
+
+    def test_single_ampersand_not_special(self):
+        """Single & is not treated as &&."""
+        tree = Loopy()
+        out = run("echo a & b", tree)
+        assert out == "a & b"
+
+    def test_no_whitespace_around_operators(self):
+        """Operators work without surrounding whitespace."""
+        tree = Loopy()
+        run("mkdir /a;mkdir /b&&mkdir /c", tree)
+        assert tree.exists("/a")
+        assert tree.exists("/b")
+        assert tree.exists("/c")
