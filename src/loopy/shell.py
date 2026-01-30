@@ -12,7 +12,80 @@ from .core_v2 import Loopy
 Command = Callable[[list[str], str, Loopy], str]
 
 
+def _split_command_chains(command: str) -> list[tuple[str, str]]:
+    """Split command on ; and && into separate chains.
+
+    Returns list of (command, separator) tuples.
+    The separator is what comes AFTER this command (';', '&&', or '' for last).
+    """
+    chains: list[tuple[str, str]] = []
+    current: list[str] = []
+    in_single = False
+    in_double = False
+    escape = False
+    i = 0
+
+    while i < len(command):
+        ch = command[i]
+
+        if escape:
+            current.append(ch)
+            escape = False
+            i += 1
+            continue
+        if ch == "\\":
+            escape = True
+            current.append(ch)
+            i += 1
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+            current.append(ch)
+            i += 1
+            continue
+        if ch == '"' and not in_single:
+            in_double = not in_double
+            current.append(ch)
+            i += 1
+            continue
+
+        # Check for && (must check before single &)
+        if not in_single and not in_double and command[i:i+2] == "&&":
+            segment = "".join(current).strip()
+            if not segment:
+                raise ValueError("empty command before &&")
+            chains.append((segment, "&&"))
+            current = []
+            i += 2
+            continue
+
+        # Check for ;
+        if ch == ";" and not in_single and not in_double:
+            segment = "".join(current).strip()
+            if not segment:
+                raise ValueError("empty command before ;")
+            chains.append((segment, ";"))
+            current = []
+            i += 1
+            continue
+
+        current.append(ch)
+        i += 1
+
+    segment = "".join(current).strip()
+    if segment:
+        chains.append((segment, ""))
+    elif chains:
+        # Trailing separator with no command
+        last_sep = chains[-1][1]
+        if last_sep:
+            raise ValueError(f"trailing {last_sep} with no command")
+
+    return chains
+
+
 def _split_pipeline(command: str) -> list[str]:
+    """Split a single command on | into pipeline stages."""
     segments: list[str] = []
     current: list[str] = []
     in_single = False
@@ -68,7 +141,8 @@ def _parse_pipeline(command: str) -> list[list[str]]:
     return parsed
 
 
-def run(command: str, tree: Loopy, stdin: str = "") -> str:
+def _run_pipeline(command: str, tree: Loopy, stdin: str = "") -> str:
+    """Run a single pipeline (commands connected by |)."""
     segments = _parse_pipeline(command)
     output = stdin
     for tokens in segments:
@@ -78,6 +152,37 @@ def run(command: str, tree: Loopy, stdin: str = "") -> str:
         if handler is None:
             raise KeyError(f"Unknown command: {name}")
         output = handler(args, output, tree)
+    return output
+
+
+def run(command: str, tree: Loopy, stdin: str = "") -> str:
+    """Run a command string, supporting pipes (|), semicolons (;), and && chains.
+
+    - `|` pipes output from one command to the next
+    - `;` runs commands sequentially, continuing even if one fails
+    - `&&` runs commands sequentially, stopping on first failure
+    """
+    chains = _split_command_chains(command)
+    if not chains:
+        return ""
+
+    output = ""
+    for cmd, separator in chains:
+        try:
+            output = _run_pipeline(cmd, tree, stdin)
+        except Exception:
+            if separator == "&&" or separator == "":
+                # For &&, propagate the error (stop chain)
+                # For last command, also propagate
+                raise
+            # For ;, swallow error and continue
+            output = ""
+            continue
+
+        # If this command succeeded and next is &&, continue
+        # If separator is ;, also continue
+        # stdin resets for each chain (no cross-chain piping)
+
     return output
 
 
@@ -390,6 +495,19 @@ def _cmd_cp(args: list[str], _stdin: str, tree: Loopy) -> str:
     return ""
 
 
+def _cmd_ln(args: list[str], _stdin: str, tree: Loopy) -> str:
+    if len(args) != 2:
+        raise ValueError("ln requires target and link path")
+    tree.ln(args[0], args[1])
+    return ""
+
+
+def _cmd_readlink(args: list[str], _stdin: str, tree: Loopy) -> str:
+    if len(args) != 1:
+        raise ValueError("readlink requires a path")
+    return tree.readlink(args[0])
+
+
 def _cmd_rm(args: list[str], _stdin: str, tree: Loopy) -> str:
     recursive = False
     path = None
@@ -619,7 +737,7 @@ def _cmd_help(_args: list[str], _stdin: str, _tree: Loopy) -> str:
   tail [path] [-n N]  Show last N lines (default 10)
   split -d <delim> [path]  Split by delimiter
   tree [path]         Show tree structure
-  find [path] [-name regex] [-type d|f]
+  find [path] [-name regex] [-type d|f|l]
   grep <pattern> [path] [-i] [-v] [-c]
   du [path] [-c]      Count nodes or content size
 
@@ -629,12 +747,16 @@ def _cmd_help(_args: list[str], _stdin: str, _tree: Loopy) -> str:
   rm [-r] <path>           Remove file/directory
   mv <src> <dst>           Move/rename
   cp <src> <dst>           Copy
+  ln <target> <link>       Create symlink
   sed <path> <pattern> <replacement> [-i] [-r] [-c n]
 
-  split <delim> [path]  Split by delimiter (or -d/--delimiter)
-
   echo <text>         Print text
-  help                Show this help"""
+  help                Show this help
+
+Command chaining:
+  cmd1 | cmd2         Pipe output of cmd1 to cmd2
+  cmd1 ; cmd2         Run cmd1 then cmd2 (continue on failure)
+  cmd1 && cmd2        Run cmd1 then cmd2 (stop on failure)"""
 
 
 COMMANDS: dict[str, Command] = {
@@ -650,6 +772,8 @@ COMMANDS: dict[str, Command] = {
     "split": _cmd_split,
     "mv": _cmd_mv,
     "cp": _cmd_cp,
+    "ln": _cmd_ln,
+    "readlink": _cmd_readlink,
     "rm": _cmd_rm,
     "mkdir": _cmd_mkdir,
     "touch": _cmd_touch,
