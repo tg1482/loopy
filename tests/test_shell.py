@@ -1427,3 +1427,5 @@ def test_sort_combined_flags():
     tree.touch("/f", "5\n1\n10")
     out = run("sort -rn /f", tree)
     assert out == "10\n5\n1"
+
+
