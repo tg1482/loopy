@@ -6,79 +6,27 @@ Loopy is a tiny Python library that exposes filesystem semantics over a string d
 
 Directories become concepts, files become entities, and paths encode relationships. Agents can create, search, reorganize, and evolve ontologies using commands they already understand.
 
+## Shell
+
+Start a REPL loop with a sample database:
+
 ```bash
 uv run python -c "from examples import product_catalog; from loopy.shell import repl; repl(product_catalog())"
 ```
 
+Quick shell example:
 
-```python
-from loopy import Loopy
+```text
+loopy> ls -R sports
+sports:
+fitness/
+outdoor/
 
-tree = (
-    Loopy()
-    .mkdir("/concepts/ml/supervised", parents=True)
-    .touch("/concepts/ml/supervised/regression", "predicts continuous values")
-    .touch("/concepts/ml/supervised/classification", "predicts categories")
-    .mkdir("/concepts/ml/unsupervised")
-    .touch("/concepts/ml/unsupervised/clustering", "groups similar items")
-)
-
-tree.grep("predicts", content=True)  # find concepts by description
-tree.find("/concepts", type="f")  # all leaf concepts
-tree.ls("/concepts/ml")  # ['supervised', 'unsupervised']
-
-# tree.raw
-# <root><concepts><ml><supervised><regression>predicts continuous values</regression><classification>predicts categories</classification></supervised><unsupervised><clustering>groups similar items</clustering></unsupervised></ml></concepts></root>
-```
-
-## Why?
-
-When an agent processes information, it needs somewhere to put it - somewhere it can search, reorganize, and grow organically. For any type of knowledge base like agent memories, product taxonomies, etc the challenge was enabling recursive interaction without a pile of specialized tools (search, create, delete, etc.) that are added to context.
-
-Recursive Language Models (RLMs) introduced the idea of putting the entire context into a Python variable and let the model recursively interact with it, instead of reasoning over everything in one shot. RLMs: https://alexzhang13.github.io/blog/2025/rlm/. I really liked it, but enabing a python REPL seemed like a bad tradeoff for generality. 
-
-Loopy imposes a known structure (a tree / filesystem), and replaces the REPL with composable Bash-style commands.
-
-Why this approach:
-
-- simple - a single string can represent the full data
-- known structure - stored in a file system format agents already know and love
-- composition - compose search commands to quickly navigate the data
-
-
-## How it works
-
-Loopy keeps an in-memory node tree and exposes filesystem-like operations. The raw string is generated on demand and can be parsed back into the same structure.
-
-```
-<root><concepts><ml><supervised>...</supervised></ml></concepts></root>
-```
-
-## Install
-
-```bash
-# Local install
-uv pip install -e .
-```
-
-## Shell for Agents
-
-Loopy includes a text shell that agents can use via tool calls:
-
-```python
-from loopy.shell import run
-
-tree = Loopy()
-
-# Agent issues text commands
-run("mkdir -p /topics/physics/quantum", tree)
-run("touch /topics/physics/quantum/entanglement 'spooky action at distance'", tree)
-run("find /topics -type f", tree)  # list all facts
-run("grep quantum /topics", tree)  # search
-run("tree /topics", tree)  # visualize
-
-# compose commands with pipes
-run("find /topics -type f | grep quantum", tree)  # find files, filter by name
+loopy> find /sports -type f
+/sports/fitness/weights/dumbbells_set
+/sports/fitness/cardio/yoga_mat
+/sports/outdoor/camping/tent_4person
+/sports/outdoor/hiking/backpack_40L
 ```
 
 ### Shell Commands
@@ -107,55 +55,54 @@ run("find /topics -type f | grep quantum", tree)  # find files, filter by name
 | `echo <text>` | Print text |
 | `help` | Show help |
 
-### Shell Examples
+## Why?
+
+When an agent processes information, it needs somewhere to put it - somewhere it can search, reorganize, and grow organically. For any type of knowledge base like agent memories, product taxonomies, etc the challenge was enabling recursive interaction without a pile of specialized tools (search, create, delete, etc.) that are added to context.
+
+Recursive Language Models (RLMs) introduced the idea of putting the entire context into a Python variable and let the model recursively interact with it, instead of reasoning over everything in one shot. RLMs: https://alexzhang13.github.io/blog/2025/rlm/. I really liked it, but enabing a python REPL seemed like a bad tradeoff for generality. 
+
+Loopy imposes a known structure (a tree / filesystem), and replaces the REPL with composable Bash-style commands.
+
+Why this approach:
+
+- simple - a single string can represent the full data
+- known structure - stored in a file system format agents already know and love
+- composition - compose search commands to quickly navigate the data
+
+
+## How it works
+
+Loopy keeps an in-memory node tree and exposes filesystem-like operations. The raw string is generated on demand and can be parsed back into the same structure.
+
+```
+<root><concepts><ml><supervised>...</supervised></ml></concepts></root>
+```
 
 ```python
 from loopy import Loopy
-from loopy.shell import run
 
-tree = Loopy()
+tree = (
+    Loopy()
+    .mkdir("/concepts/ml/supervised", parents=True)
+    .touch("/concepts/ml/supervised/regression", "predicts continuous values")
+    .touch("/concepts/ml/supervised/classification", "predicts categories")
+    .mkdir("/concepts/ml/unsupervised")
+    .touch("/concepts/ml/unsupervised/clustering", "groups similar items")
+)
 
-# Build a knowledge base
-run("mkdir -p /ml/supervised", tree)
-run("touch /ml/supervised/regression 'predicts continuous values'", tree)
-run("touch /ml/supervised/classification 'predicts discrete labels'", tree)
-run("mkdir -p /ml/unsupervised", tree)
-run("touch /ml/unsupervised/clustering 'groups similar items'", tree)
+tree.grep("predicts", content=True)  # find concepts by description
+tree.find("/concepts", type="f")  # all leaf concepts
+tree.ls("/concepts/ml")  # ['supervised', 'unsupervised']
 
-# Navigate and explore
-run("tree /ml", tree)
-# ml
-# ├── supervised
-# │   ├── regression
-# │   └── classification
-# └── unsupervised
-#     └── clustering
+# tree.raw
+# <root><concepts><ml><supervised><regression>predicts continuous values</regression><classification>predicts categories</classification></supervised><unsupervised><clustering>groups similar items</clustering></unsupervised></ml></concepts></root>
+```
 
-# Search by content
-run("grep predicts /ml", tree)  # files containing "predicts"
+## Install
 
-# Pipeline: find all files, filter by name
-run("find /ml -type f | grep class", tree)
-# /ml/supervised/classification
-
-# Read and slice content
-run("cat /ml/supervised/regression", tree)
-# predicts continuous values
-
-# Count nodes
-run("du /ml", tree)  # 6 (directories + files)
-
-# Modify content
-run("sed /ml/supervised/regression 'continuous' 'numeric'", tree)
-run("cat /ml/supervised/regression", tree)
-# predicts numeric values
-
-# Move and copy
-run("cp /ml/supervised/regression /ml/linear_regression", tree)
-run("mv /ml/unsupervised/clustering /ml/kmeans", tree)
-
-# Pipe echo to create files
-run("echo 'neural network model' | touch /ml/deep_learning", tree)
+```bash
+# Local install
+uv pip install -e .
 ```
 
 ## API
@@ -224,7 +171,6 @@ tree = product_catalog()
 tree.ls("/clothing/mens/shoes")  # ['loafers_brown']
 tree.grep("price:.*99", content=True)  # products ending in .99
 ```
-
 
 ## License
 
