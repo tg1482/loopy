@@ -898,6 +898,7 @@ def _cmd_help(_args: list[str], _stdin: str, _tree: Loopy) -> str:
   mv <src> <dst>           Move/rename
   cp <src> <dst>           Copy
   ln <target> <link>       Create symlink
+  readlink <path>          Show symlink target
   sed <path> <pattern> <replacement> [-i] [-r] [-c n]
 
   echo <text>         Print text

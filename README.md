@@ -39,8 +39,10 @@ loopy> find /sports -type f
 | `cat [path] [--range start len]` | Show file contents |
 | `head [path] [-n N]` | Show first N lines (default 10) |
 | `tail [path] [-n N]` | Show last N lines (default 10) |
+| `wc [-lwc] [path]` | Count lines/words/chars |
+| `sort [-rnu] [path]` | Sort lines |
 | `tree [path]` | Show tree structure |
-| `find [path] [-name pat] [-type d\|f]` | Find files/directories |
+| `find [path] [-name pat] [-type d\|f\|l]` | Find files/directories/symlinks |
 | `grep <pat> [path] [-i] [-v] [-c]` | Search by regex |
 | `du [path] [-c]` | Count nodes or content size |
 | `info [path]` | Show node metadata |
@@ -50,10 +52,21 @@ loopy> find /sports -type f
 | `rm [-r] <path>` | Remove file/directory |
 | `mv <src> <dst>` | Move/rename |
 | `cp <src> <dst>` | Copy |
+| `ln <target> <link>` | Create symlink |
+| `readlink <path>` | Show symlink target |
 | `sed <path> <pat> <repl> [-i] [-r]` | Search and replace |
-| `split <delim> [path]` | Split content by delimiter (or -d/--delimiter) |
+| `split <delim> [path]` | Split content by delimiter |
 | `echo <text>` | Print text |
 | `help` | Show help |
+
+### Command Chaining
+
+| Operator | Description |
+|----------|-------------|
+| `cmd1 \| cmd2` | Pipe output of cmd1 to cmd2 |
+| `cmd1 ; cmd2` | Run both, continue on failure |
+| `cmd1 && cmd2` | Run cmd2 only if cmd1 succeeds |
+| `cmd1 \|\| cmd2` | Run cmd2 only if cmd1 fails |
 
 ## Why?
 
@@ -118,6 +131,7 @@ uv pip install -e .
 | `rm(path, recursive=True)` | Delete node |
 | `mv(src, dst)` | Move/rename |
 | `cp(src, dst)` | Copy |
+| `ln(target, link)` | Create symlink |
 | `exists(path)` | Check existence |
 
 ### Search
@@ -125,7 +139,7 @@ uv pip install -e .
 | Method | Description |
 |--------|-------------|
 | `grep(pattern, content=True)` | Search by regex |
-| `find(path, type="f")` | Find by type (f=file, d=dir) |
+| `find(path, type="f")` | Find by type (f=file, d=dir, l=link) |
 | `glob(pattern)` | Glob patterns (`**/*.py`) |
 
 ### Navigation
@@ -144,6 +158,9 @@ uv pip install -e .
 | `du(path)` | Count nodes |
 | `info(path)` | Metadata dict |
 | `isdir(path)` / `isfile(path)` | Type checks |
+| `islink(path)` | Check if symlink |
+| `readlink(path)` | Get symlink target |
+| `backlinks(path)` | Find all symlinks pointing to path |
 | `walk(path)` | os.walk() style |
 | `.raw` | The underlying string |
 
