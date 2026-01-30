@@ -1,8 +1,15 @@
 # Loopy
 
-Loopy: a filesystem API over a single Python string.
+Loopy: a filesystem API over a string database.
 
-Loopy is a tiny Python library that exposes filesystem semantics over a single serialized string. Directories become concepts, files become entities, and paths encode relationships. Agents can create, search, reorganize, and evolve ontologies using commands they already understand.
+Loopy is a tiny Python library that exposes filesystem semantics over a string database. It comes with a bash‑style shell so you or your agent can navigate, search, and manipulate a tree‑structured knowledge base with composable commands.
+
+Directories become concepts, files become entities, and paths encode relationships. Agents can create, search, reorganize, and evolve ontologies using commands they already understand.
+
+```bash
+uv run python -c "from examples import product_catalog; from loopy.shell import repl; repl(product_catalog())"
+```
+
 
 ```python
 from loopy import Loopy
@@ -28,7 +35,7 @@ tree.ls("/concepts/ml")  # ['supervised', 'unsupervised']
 
 When an agent processes information, it needs somewhere to put it - somewhere it can search, reorganize, and grow organically. For any type of knowledge base like agent memories, product taxonomies, etc the challenge was enabling recursive interaction without a pile of specialized tools (search, create, delete, etc.) that are added to context.
 
-Recursive Language Models (RLMs) introduced the idea of putting the entire context into a Python variable and let the model recursively interact with it, instead of reasoning over everything in one shot. RLMs: https://alexzhang13.github.io/blog/2025/rlm/. I really liked it, but enabing REPL seemed like a bad tradeoff for generality. 
+Recursive Language Models (RLMs) introduced the idea of putting the entire context into a Python variable and let the model recursively interact with it, instead of reasoning over everything in one shot. RLMs: https://alexzhang13.github.io/blog/2025/rlm/. I really liked it, but enabing a python REPL seemed like a bad tradeoff for generality. 
 
 Loopy imposes a known structure (a tree / filesystem), and replaces the REPL with composable Bash-style commands.
 
@@ -74,7 +81,82 @@ run("tree /topics", tree)  # visualize
 run("find /topics -type f | grep quantum", tree)  # find files, filter by name
 ```
 
-Commands: `ls`, `cd`, `pwd`, `cat`, `tree`, `find`, `grep`, `du`, `touch`, `mkdir`, `rm -r`, `mv`, `cp`, `sed`, `help`
+### Shell Commands
+
+| Command | Description |
+|---------|-------------|
+| `ls [path] [-R]` | List directory contents |
+| `cd <path>` | Change directory |
+| `pwd` | Print working directory |
+| `cat [path] [--range start len]` | Show file contents |
+| `head [path] [-n N]` | Show first N lines (default 10) |
+| `tail [path] [-n N]` | Show last N lines (default 10) |
+| `tree [path]` | Show tree structure |
+| `find [path] [-name pat] [-type d\|f]` | Find files/directories |
+| `grep <pat> [path] [-i] [-v] [-c]` | Search by regex |
+| `du [path] [-c]` | Count nodes or content size |
+| `info [path]` | Show node metadata |
+| `touch <path> [content]` | Create file |
+| `write <path> [content]` | Write to file (overwrites) |
+| `mkdir [-p] <path>` | Create directory |
+| `rm [-r] <path>` | Remove file/directory |
+| `mv <src> <dst>` | Move/rename |
+| `cp <src> <dst>` | Copy |
+| `sed <path> <pat> <repl> [-i] [-r]` | Search and replace |
+| `split <delim> [path]` | Split content by delimiter (or -d/--delimiter) |
+| `echo <text>` | Print text |
+| `help` | Show help |
+
+### Shell Examples
+
+```python
+from loopy import Loopy
+from loopy.shell import run
+
+tree = Loopy()
+
+# Build a knowledge base
+run("mkdir -p /ml/supervised", tree)
+run("touch /ml/supervised/regression 'predicts continuous values'", tree)
+run("touch /ml/supervised/classification 'predicts discrete labels'", tree)
+run("mkdir -p /ml/unsupervised", tree)
+run("touch /ml/unsupervised/clustering 'groups similar items'", tree)
+
+# Navigate and explore
+run("tree /ml", tree)
+# ml
+# ├── supervised
+# │   ├── regression
+# │   └── classification
+# └── unsupervised
+#     └── clustering
+
+# Search by content
+run("grep predicts /ml", tree)  # files containing "predicts"
+
+# Pipeline: find all files, filter by name
+run("find /ml -type f | grep class", tree)
+# /ml/supervised/classification
+
+# Read and slice content
+run("cat /ml/supervised/regression", tree)
+# predicts continuous values
+
+# Count nodes
+run("du /ml", tree)  # 6 (directories + files)
+
+# Modify content
+run("sed /ml/supervised/regression 'continuous' 'numeric'", tree)
+run("cat /ml/supervised/regression", tree)
+# predicts numeric values
+
+# Move and copy
+run("cp /ml/supervised/regression /ml/linear_regression", tree)
+run("mv /ml/unsupervised/clustering /ml/kmeans", tree)
+
+# Pipe echo to create files
+run("echo 'neural network model' | touch /ml/deep_learning", tree)
+```
 
 ## API
 
