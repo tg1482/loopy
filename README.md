@@ -1,6 +1,6 @@
 # Loopy
 
-Loopy: a filesystem API over a string database.
+Loopy: a filesystem API over a single Python string.
 
 Loopy is a tiny Python library that exposes filesystem semantics over a string database. It comes with a bash‑style shell so you or your agent can navigate, search, and manipulate a tree‑structured knowledge base with composable commands.
 
