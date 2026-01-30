@@ -13,10 +13,10 @@ Command = Callable[[list[str], str, Loopy], str]
 
 
 def _split_command_chains(command: str) -> list[tuple[str, str]]:
-    """Split command on ; and && into separate chains.
+    """Split command on ;, &&, and || into separate chains.
 
     Returns list of (command, separator) tuples.
-    The separator is what comes AFTER this command (';', '&&', or '' for last).
+    The separator is what comes AFTER this command (';', '&&', '||', or '' for last).
     """
     chains: list[tuple[str, str]] = []
     current: list[str] = []
@@ -55,6 +55,16 @@ def _split_command_chains(command: str) -> list[tuple[str, str]]:
             if not segment:
                 raise ValueError("empty command before &&")
             chains.append((segment, "&&"))
+            current = []
+            i += 2
+            continue
+
+        # Check for || (must check before single |)
+        if not in_single and not in_double and command[i:i+2] == "||":
+            segment = "".join(current).strip()
+            if not segment:
+                raise ValueError("empty command before ||")
+            chains.append((segment, "||"))
             current = []
             i += 2
             continue
@@ -156,32 +166,63 @@ def _run_pipeline(command: str, tree: Loopy, stdin: str = "") -> str:
 
 
 def run(command: str, tree: Loopy, stdin: str = "") -> str:
-    """Run a command string, supporting pipes (|), semicolons (;), and && chains.
+    """Run a command string, supporting pipes and command chaining.
 
-    - `|` pipes output from one command to the next
-    - `;` runs commands sequentially, continuing even if one fails
+    - `|`  pipes output from one command to the next
+    - `;`  runs commands sequentially, continuing even if one fails
     - `&&` runs commands sequentially, stopping on first failure
+    - `||` runs next command only if previous failed
     """
     chains = _split_command_chains(command)
     if not chains:
         return ""
 
     output = ""
-    for cmd, separator in chains:
-        try:
-            output = _run_pipeline(cmd, tree, stdin)
-        except Exception:
-            if separator == "&&" or separator == "":
-                # For &&, propagate the error (stop chain)
-                # For last command, also propagate
-                raise
-            # For ;, swallow error and continue
-            output = ""
+    pending_error: Exception | None = None
+    last_succeeded = True
+
+    for i, (cmd, separator) in enumerate(chains):
+        prev_sep = chains[i - 1][1] if i > 0 else None
+
+        # Decide whether to run this command based on previous separator and result
+        should_run = True
+
+        if prev_sep == "&&" and not last_succeeded:
+            # Previous was && and failed - skip this
+            should_run = False
+        elif prev_sep == "||" and last_succeeded:
+            # Previous was || and succeeded - skip this
+            should_run = False
+
+        if not should_run:
+            # Propagate the skip state but keep pending_error
+            # Don't change last_succeeded (carry forward)
             continue
 
-        # If this command succeeded and next is &&, continue
-        # If separator is ;, also continue
-        # stdin resets for each chain (no cross-chain piping)
+        try:
+            output = _run_pipeline(cmd, tree, stdin)
+            last_succeeded = True
+            pending_error = None
+        except Exception as e:
+            output = ""
+            last_succeeded = False
+
+            if separator == "||":
+                # Failed, but || means next command will run
+                pending_error = None
+            elif separator == "&&":
+                # Failed, next && command will be skipped
+                pending_error = e
+            elif separator == ";":
+                # Failed but ; continues, no propagation
+                pending_error = None
+            else:
+                # Last command, propagate error
+                raise
+
+    # If chain ended with unhandled error (e.g., a && b where a failed)
+    if pending_error is not None:
+        raise pending_error
 
     return output
 
@@ -675,6 +716,113 @@ def _cmd_tail(args: list[str], stdin: str, tree: Loopy) -> str:
     return "\n".join(lines[-n_lines:])
 
 
+def _cmd_wc(args: list[str], stdin: str, tree: Loopy) -> str:
+    """Word count: lines, words, chars."""
+    count_lines = False
+    count_words = False
+    count_chars = False
+    path: str | None = None
+
+    for arg in args:
+        if arg == "-l":
+            count_lines = True
+        elif arg == "-w":
+            count_words = True
+        elif arg == "-c" or arg == "-m":
+            count_chars = True
+        elif arg.startswith("-"):
+            # Handle combined flags like -lw
+            for flag in arg[1:]:
+                if flag == "l":
+                    count_lines = True
+                elif flag == "w":
+                    count_words = True
+                elif flag in ("c", "m"):
+                    count_chars = True
+                else:
+                    raise ValueError(f"unknown wc option: -{flag}")
+        elif path is None:
+            path = arg
+        else:
+            raise ValueError("wc takes at most one path")
+
+    # Default: show all three
+    if not count_lines and not count_words and not count_chars:
+        count_lines = count_words = count_chars = True
+
+    if path is not None:
+        content = tree.cat(path)
+    else:
+        content = stdin
+
+    results = []
+    if count_lines:
+        lines = content.count("\n")
+        # Add 1 if content doesn't end with newline but has content
+        if content and not content.endswith("\n"):
+            lines += 1
+        results.append(str(lines))
+    if count_words:
+        results.append(str(len(content.split())))
+    if count_chars:
+        results.append(str(len(content)))
+
+    return " ".join(results)
+
+
+def _cmd_sort(args: list[str], stdin: str, tree: Loopy) -> str:
+    """Sort lines."""
+    reverse = False
+    unique = False
+    numeric = False
+    path: str | None = None
+
+    for arg in args:
+        if arg.startswith("-") and len(arg) > 1 and not arg[1].isdigit():
+            # Handle combined flags like -rn
+            for flag in arg[1:]:
+                if flag == "r":
+                    reverse = True
+                elif flag == "u":
+                    unique = True
+                elif flag == "n":
+                    numeric = True
+                else:
+                    raise ValueError(f"unknown sort option: -{flag}")
+        elif path is None:
+            path = arg
+        else:
+            raise ValueError("sort takes at most one path")
+
+    if path is not None:
+        content = tree.cat(path)
+    else:
+        content = stdin
+
+    lines = content.splitlines()
+
+    if numeric:
+        def sort_key(line: str):
+            # Extract leading number, default to 0
+            import re
+            match = re.match(r"-?\d+", line.strip())
+            return int(match.group()) if match else 0
+        lines.sort(key=sort_key, reverse=reverse)
+    else:
+        lines.sort(reverse=reverse)
+
+    if unique:
+        seen = set()
+        unique_lines = []
+        for line in lines:
+            if line not in seen:
+                seen.add(line)
+                unique_lines.append(line)
+        lines = unique_lines
+
+    return "\n".join(lines)
+
+
 def _cmd_split(args: list[str], stdin: str, tree: Loopy) -> str:
     delimiter: str | None = None
     path: str | None = None
@@ -735,6 +883,8 @@ def _cmd_help(_args: list[str], _stdin: str, _tree: Loopy) -> str:
   cat [path] [--range start length]  Show file contents
   head [path] [-n N]  Show first N lines (default 10)
   tail [path] [-n N]  Show last N lines (default 10)
+  wc [-lwc] [path]    Count lines/words/chars
+  sort [-rnu] [path]  Sort lines (-r reverse, -n numeric, -u unique)
   split -d <delim> [path]  Split by delimiter
   tree [path]         Show tree structure
   find [path] [-name regex] [-type d|f|l]
@@ -748,6 +898,7 @@ def _cmd_help(_args: list[str], _stdin: str, _tree: Loopy) -> str:
   mv <src> <dst>           Move/rename
   cp <src> <dst>           Copy
   ln <target> <link>       Create symlink
+  readlink <path>          Show symlink target
   sed <path> <pattern> <replacement> [-i] [-r] [-c n]
 
   echo <text>         Print text
@@ -756,7 +907,8 @@ def _cmd_help(_args: list[str], _stdin: str, _tree: Loopy) -> str:
 Command chaining:
   cmd1 | cmd2         Pipe output of cmd1 to cmd2
   cmd1 ; cmd2         Run cmd1 then cmd2 (continue on failure)
-  cmd1 && cmd2        Run cmd1 then cmd2 (stop on failure)"""
+  cmd1 && cmd2        Run cmd1 then cmd2 (stop on failure)
+  cmd1 || cmd2        Run cmd2 only if cmd1 fails"""
 
 
 COMMANDS: dict[str, Command] = {
@@ -783,6 +935,8 @@ COMMANDS: dict[str, Command] = {
     "info": _cmd_info,
     "head": _cmd_head,
     "tail": _cmd_tail,
+    "wc": _cmd_wc,
+    "sort": _cmd_sort,
 }
 
 
