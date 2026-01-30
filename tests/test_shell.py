@@ -1299,3 +1299,131 @@ class TestCommandChainingEdgeCases:
         assert tree.exists("/a")
         assert tree.exists("/b")
         assert tree.exists("/c")
+
+    def test_or_or_runs_on_failure(self):
+        """|| runs next command only if previous fails."""
+        tree = Loopy()
+        run("cat /nonexistent || mkdir /fallback", tree)
+        assert tree.exists("/fallback")
+
+    def test_or_or_skips_on_success(self):
+        """|| skips next command if previous succeeds."""
+        tree = Loopy()
+        tree.touch("/exists", "content")
+        run("cat /exists || mkdir /fallback", tree)
+        assert not tree.exists("/fallback")
+
+    def test_or_or_chain(self):
+        """Multiple || in chain - first success stops."""
+        tree = Loopy()
+        run("cat /a || cat /b || mkdir /fallback", tree)
+        assert tree.exists("/fallback")
+
+    def test_mixed_and_and_or_or(self):
+        """&& and || can be mixed."""
+        tree = Loopy()
+        # fail && (skip) || run
+        run("cat /x && mkdir /a || mkdir /b", tree)
+        assert not tree.exists("/a")
+        assert tree.exists("/b")
+
+
+# ============================================================================
+# wc and sort command tests
+# ============================================================================
+
+
+def test_wc_all():
+    """wc with no flags shows lines, words, chars."""
+    tree = Loopy()
+    tree.touch("/f", "hello world\nfoo bar")
+    out = run("wc /f", tree)
+    assert out == "2 4 19"  # 2 lines, 4 words, 19 chars
+
+
+def test_wc_lines_only():
+    """wc -l counts lines."""
+    tree = Loopy()
+    tree.touch("/f", "a\nb\nc\n")
+    out = run("wc -l /f", tree)
+    assert out == "3"
+
+
+def test_wc_words_only():
+    """wc -w counts words."""
+    tree = Loopy()
+    tree.touch("/f", "one two three")
+    out = run("wc -w /f", tree)
+    assert out == "3"
+
+
+def test_wc_chars_only():
+    """wc -c counts chars."""
+    tree = Loopy()
+    tree.touch("/f", "hello")
+    out = run("wc -c /f", tree)
+    assert out == "5"
+
+
+def test_wc_from_pipe():
+    """wc reads from stdin when piped."""
+    tree = Loopy()
+    tree.touch("/f", "line1\nline2\nline3")
+    out = run("cat /f | wc -l", tree)
+    assert out == "3"
+
+
+def test_wc_combined_flags():
+    """wc -lw shows lines and words."""
+    tree = Loopy()
+    tree.touch("/f", "a b\nc d\n")
+    out = run("wc -lw /f", tree)
+    assert out == "2 4"
+
+
+def test_sort_basic():
+    """sort sorts lines alphabetically."""
+    tree = Loopy()
+    tree.touch("/f", "banana\napple\ncherry")
+    out = run("sort /f", tree)
+    assert out == "apple\nbanana\ncherry"
+
+
+def test_sort_reverse():
+    """sort -r reverses order."""
+    tree = Loopy()
+    tree.touch("/f", "a\nb\nc")
+    out = run("sort -r /f", tree)
+    assert out == "c\nb\na"
+
+
+def test_sort_numeric():
+    """sort -n sorts numerically."""
+    tree = Loopy()
+    tree.touch("/f", "10\n2\n1\n20")
+    out = run("sort -n /f", tree)
+    assert out == "1\n2\n10\n20"
+
+
+def test_sort_unique():
+    """sort -u removes duplicates."""
+    tree = Loopy()
+    tree.touch("/f", "a\nb\na\nc\nb")
+    out = run("sort -u /f", tree)
+    assert out == "a\nb\nc"
+
+
+def test_sort_from_pipe():
+    """sort reads from stdin when piped."""
+    tree = Loopy()
+    tree.touch("/f", "z\na\nm")
+    out = run("cat /f | sort", tree)
+    assert out == "a\nm\nz"
+
+
+def test_sort_combined_flags():
+    """sort -rn sorts numeric descending."""
+    tree = Loopy()
+    tree.touch("/f", "5\n1\n10")
+    out = run("sort -rn /f", tree)
+    assert out == "10\n5\n1"
