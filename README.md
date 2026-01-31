@@ -82,6 +82,9 @@ tree.ls("/concepts/ml")  # ['supervised', 'unsupervised']
 ```bash
 # Local install
 uv pip install -e .
+
+# PyPI
+uv pip install loopy-fs
 ```
 
 ## API
