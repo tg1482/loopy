@@ -1,0 +1,16 @@
+[project]
+name = "loopy-shell-mcp"
+version = "0.1.0"
+description = "MCP shell server for Loopy"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.0.0,<2",
+    "tomli>=2.0.0",
+]
+
+[project.scripts]
+loopy-mcp = "loopy_mcp:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

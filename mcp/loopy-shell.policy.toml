@@ -1,0 +1,32 @@
+root_dir = ".."
+timeout_ms = 120000
+max_output_bytes = 50000
+
+allowed_commands = [
+  "ls",
+  "cat",
+  "grep",
+  "find",
+  "tree",
+  "du",
+  "pwd",
+  "cd",
+  "echo",
+  "printf",
+  "split",
+  "mv",
+  "cp",
+  "ln",
+  "readlink",
+  "rm",
+  "mkdir",
+  "touch",
+  "write",
+  "sed",
+  "help",
+  "info",
+  "head",
+  "tail",
+  "wc",
+  "sort",
+]
