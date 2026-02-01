@@ -83,11 +83,11 @@ tree.ls("/concepts/ml")  # ['supervised', 'unsupervised']
 from loopy.file_store import FileBackedLoopy, load, save
 
 tree = FileBackedLoopy("notes.loopy")
-tree.touch("/ideas/mcp", "Expose shell with MCP")
+tree.touch("/ideas/mcp", "Expose shell with MCP")  # auto-saved
 
 tree = load("notes.loopy")
 tree.mkdir("/scratch", parents=True)
-save(tree, "notes.loopy")
+save(tree, "notes.loopy")  # explicit save for non-file-backed trees
 ```
 
 ## Install
