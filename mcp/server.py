@@ -27,9 +27,7 @@ def _command_name(tokens: list[str]) -> str:
 
 
 def _ensure_allowed(policy: ShellPolicy, name: str) -> None:
-    if name in policy.deny_commands:
-        raise ValueError(f"command denied: {name}")
-    if name not in policy.allow_commands:
+    if name not in policy.allowed_commands:
         raise ValueError(f"command not allowed: {name}")
 
 
@@ -48,22 +46,6 @@ def _resolve_cwd(policy: ShellPolicy, cwd: str | None) -> Path:
     return resolved
 
 
-def _build_env(policy: ShellPolicy, extra: dict[str, str] | None) -> dict[str, str]:
-    env = {
-        name: value
-        for name, value in os.environ.items()
-        if name in policy.env_allowlist
-    }
-    if not extra:
-        return env
-
-    for name in extra:
-        if name not in policy.env_allowlist:
-            raise ValueError(f"env var not allowed: {name}")
-    env.update({name: str(value) for name, value in extra.items()})
-    return env
-
-
 def _truncate(text: str, max_bytes: int) -> tuple[str, bool]:
     if max_bytes <= 0:
         return "", True
@@ -77,7 +59,6 @@ def _run_command(
     policy: ShellPolicy,
     cmd: str,
     cwd: str | None,
-    env: dict[str, str] | None,
     timeout_ms: int | None,
 ) -> ShellResult:
     tokens = shlex.split(cmd)
@@ -85,7 +66,7 @@ def _run_command(
     _ensure_allowed(policy, name)
 
     resolved_cwd = _resolve_cwd(policy, cwd)
-    resolved_env = _build_env(policy, env)
+    resolved_env = dict(os.environ)
 
     timeout = policy.timeout_ms / 1000
     if timeout_ms is not None:
@@ -122,9 +103,8 @@ def create_server(policy: ShellPolicy) -> MCPServer:
     def shell_run(
         cmd: str,
         cwd: str | None = None,
-        env: dict[str, str] | None = None,
         timeout_ms: int | None = None,
     ) -> ShellResult:
-        return _run_command(policy, cmd, cwd, env, timeout_ms)
+        return _run_command(policy, cmd, cwd, timeout_ms)
 
     return mcp

@@ -11,9 +11,7 @@ class ShellPolicy:
     root_dir: Path
     timeout_ms: int
     max_output_bytes: int
-    allow_commands: set[str]
-    deny_commands: set[str]
-    env_allowlist: set[str]
+    allowed_commands: set[str]
 
 
 def _load_toml(path: Path) -> dict:
@@ -21,16 +19,9 @@ def _load_toml(path: Path) -> dict:
         return tomllib.load(handle)
 
 
-def _parse_commands(config: dict, key: str) -> set[str]:
-    value = config.get(key, {})
-    commands = value.get("commands", [])
+def _parse_allowed_commands(config: dict) -> set[str]:
+    commands = config.get("allowed_commands", [])
     return {str(cmd).strip() for cmd in commands if str(cmd).strip()}
-
-
-def _parse_env_allowlist(config: dict) -> set[str]:
-    env_config = config.get("env", {})
-    allowlist = env_config.get("allowlist", [])
-    return {str(name).strip() for name in allowlist if str(name).strip()}
 
 
 def _resolve_root_dir(raw: str | None, base_dir: Path) -> Path:
@@ -55,18 +46,14 @@ def load_policy(path: Path | None) -> ShellPolicy:
     timeout_ms = int(config.get("timeout_ms", 120000))
     max_output_bytes = int(config.get("max_output_bytes", 50000))
 
-    allow_commands = _parse_commands(config, "allow")
-    deny_commands = _parse_commands(config, "deny")
-    env_allowlist = _parse_env_allowlist(config)
+    allowed_commands = _parse_allowed_commands(config)
 
-    if not allow_commands:
-        raise ValueError("policy must define allow.commands")
+    if not allowed_commands:
+        raise ValueError("policy must define allowed_commands")
 
     return ShellPolicy(
         root_dir=root_dir,
         timeout_ms=timeout_ms,
         max_output_bytes=max_output_bytes,
-        allow_commands=allow_commands,
-        deny_commands=deny_commands,
-        env_allowlist=env_allowlist,
+        allowed_commands=allowed_commands,
     )

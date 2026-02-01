@@ -2,24 +2,31 @@ root_dir = ".."
 timeout_ms = 120000
 max_output_bytes = 50000
 
-[allow]
-commands = [
-  "git",
+allowed_commands = [
   "ls",
-  "pwd",
-  "rg",
   "cat",
-  "python",
-  "uv",
-  "make",
-  "node",
-  "npm",
-  "pnpm",
-  "bun",
+  "grep",
+  "find",
+  "tree",
+  "du",
+  "pwd",
+  "cd",
+  "echo",
+  "printf",
+  "split",
+  "mv",
+  "cp",
+  "ln",
+  "readlink",
+  "rm",
+  "mkdir",
+  "touch",
+  "write",
+  "sed",
+  "help",
+  "info",
+  "head",
+  "tail",
+  "wc",
+  "sort",
 ]
-
-[deny]
-commands = ["rm", "shutdown", "reboot", "mkfs", "dd"]
-
-[env]
-allowlist = ["PATH", "HOME", "LANG", "LC_ALL"]
