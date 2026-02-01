@@ -170,10 +170,16 @@ output = run(
 )
 ```
 
+Start a REPL loop from a file-backed database (auto-saves on every mutation):
+
+```bash
+uv run python -m loopy.shell notes.loopy
+```
+
 Start a REPL loop with a sample database:
 
 ```bash
-uv run python -c "from examples import product_catalog; from loopy.shell import repl; repl(product_catalog())"
+uv run python -m loopy.shell examples/product_catalog.loopy
 ```
 
 Quick shell example:
@@ -235,19 +241,27 @@ loopy> find /sports -type f
 
 Loopy ships with example databases in `examples/`:
 
+- `product_catalog.loopy` - E-commerce taxonomy
+- `knowledge_graph.loopy` - ML/CS concept ontology
+- `bookmarks.loopy` - Browser bookmarks
+- `recipes.loopy` - Recipe collection
+- `org_chart.loopy` - Company org chart
+
+```bash
+uv run python -m loopy.shell examples/knowledge_graph.loopy
+loopy> cat /concepts/ml/deep_learning/architectures/transformer
+def:Attention-based architecture|prereq:attention,mlp|paper:attention_is_all_you_need
+
+loopy> grep "prereq:.*transformer" -c
+2
+```
+
+Or load in Python:
+
 ```python
-from examples import knowledge_graph, product_catalog, bookmarks, recipes, org_chart
+from loopy.file_store import load
 
-# ML/CS concept ontology
-tree = knowledge_graph()
-tree.cat("/concepts/ml/deep_learning/architectures/transformer")
-# "def:Attention-based architecture|prereq:attention,mlp|paper:attention_is_all_you_need"
-
-tree.grep("prereq:.*transformer", content=True)  # what needs transformers?
-tree.find("/concepts/ml", type="f")  # all ML concepts
-
-# E-commerce taxonomy
-tree = product_catalog()
+tree = load("examples/product_catalog.loopy")
 tree.ls("/clothing/mens/shoes")  # ['loafers_brown']
 tree.grep("price:.*99", content=True)  # products ending in .99
 ```
