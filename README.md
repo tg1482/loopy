@@ -77,6 +77,19 @@ tree.ls("/concepts/ml")  # ['supervised', 'unsupervised']
 # <root><concepts><ml><supervised><regression>predicts continuous values</regression><classification>predicts categories</classification></supervised><unsupervised><clustering>groups similar items</clustering></unsupervised></ml></concepts></root>
 ```
 
+### File-backed
+
+```python
+from loopy.file_store import FileBackedLoopy, load, save
+
+tree = FileBackedLoopy("notes.loopy")
+tree.touch("/ideas/mcp", "Expose shell with MCP")
+
+tree = load("notes.loopy")
+tree.mkdir("/scratch", parents=True)
+save(tree, "notes.loopy")
+```
+
 ## Install
 
 ```bash

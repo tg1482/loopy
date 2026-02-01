@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 import re
-from typing import Optional
+from typing import Callable, Optional
 
 # Regex pattern for valid tag names (alphanumeric, underscore, hyphen, dot)
 TAG_NAME = r"[\w.\-]+"
@@ -40,6 +40,7 @@ class Node:
         link_target: If set, this node is a symlink pointing to the given path.
                     Symlinks are always self-closing and have no text/children.
     """
+
     name: str
     text: str = ""
     children: list["Node"] = field(default_factory=list)
@@ -77,7 +78,7 @@ def _parse_symlink_attr(token: str) -> tuple[str, Optional[str]]:
     link_target = _unescape(link_target)
 
     # The rest should be just "/" for self-closing
-    remainder = token[quote_end + 1:]
+    remainder = token[quote_end + 1 :]
     if remainder != "/":
         raise ValueError(f"Symlinks must be self-closing: {token!r}")
 
@@ -131,10 +132,7 @@ def parse(data: str) -> Node:
                     raise ValueError(f"Invalid tag name: {name!r}")
                 parent = stack[-1] if stack else None
                 node = Node(
-                    name=name,
-                    parent=parent,
-                    self_closing=True,
-                    link_target=link_target
+                    name=name, parent=parent, self_closing=True, link_target=link_target
                 )
                 if parent:
                     parent.children.append(node)
@@ -188,12 +186,15 @@ def emit(node: Node) -> str:
 class Loopy:
     """A lightweight tree structure stored as a string with filesystem operations."""
 
-    def __init__(self, data: str = "<root/>"):
+    def __init__(
+        self, data: str = "<root/>", on_mutate: Callable[[], None] | None = None
+    ):
         raw = data if data else "<root/>"
         self._raw_cache = raw
         self._root = parse(raw)
         self._cwd = "/"
         self._dirty = False
+        self._on_mutate = on_mutate
 
     @property
     def cwd(self) -> str:
@@ -202,6 +203,8 @@ class Loopy:
 
     def _mark_dirty(self) -> None:
         self._dirty = True
+        if self._on_mutate is not None:
+            self._on_mutate()
 
     def _resolve(self, path: str) -> str:
         """Resolve path relative to cwd. Supports '.' and '..' components."""
