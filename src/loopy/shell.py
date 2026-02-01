@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import re
 import shlex
+import sys
+from pathlib import Path
 from typing import Callable
 
 from .core_v2 import Loopy
+from .file_store import FileBackedLoopy
 
 
 Command = Callable[[list[str], str, Loopy], str]
@@ -263,6 +266,11 @@ def repl(tree: Loopy | None = None, prompt: str = "loopy> ") -> None:
         else:
             if out:
                 print(out)
+
+
+def repl_file(path: str | Path, prompt: str = "loopy> ") -> None:
+    tree = FileBackedLoopy(path)
+    repl(tree, prompt=prompt)
 
 
 def _display_path(path: str) -> str:
@@ -1052,5 +1060,16 @@ COMMANDS: dict[str, Command] = {
 }
 
 
+def _main(argv: list[str] | None = None) -> None:
+    args = sys.argv[1:] if argv is None else argv
+    if not args:
+        repl()
+        return
+    if len(args) == 1:
+        repl_file(args[0])
+        return
+    raise SystemExit("usage: python -m loopy.shell [path]")
+
+
 if __name__ == "__main__":
-    repl()
+    _main()
