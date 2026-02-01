@@ -1,8 +1,8 @@
 # Loopy: an in-memory, zero-side-effect filesystem API over a single Python string.
 
-Loopy is a tiny Python library that exposes filesystem semantics over a string database. It comes with a bash‑style shell so you or your agent can navigate, search, and manipulate a tree‑structured knowledge base with composable commands.
+Loopy is a filesystem sandbox whose entire state lives in a single string. It comes with a bash‑style shell so you or your agent can navigate, search, and manipulate a tree‑structured knowledge base with composable commands.
 
-The idea is to simulate a file system to buld and navigate a knowledge tree with POSIX-style commands that agents are already familiar with. 
+The idea is to simulate a file system to build and navigate a knowledge tree with POSIX-style commands that agents are already familiar with. 
 
 
 ```python
@@ -206,6 +206,7 @@ loopy> find /sports -type f
 | `sed <path> <pat> <repl> [-i] [-r]` | Search and replace |
 | `split <delim> [path]` | Split content by delimiter |
 | `echo <text>` | Print text |
+| `printf <fmt> [args]` | Print formatted text |
 | `help` | Show help |
 
 ### Command Chaining

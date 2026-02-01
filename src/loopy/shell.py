@@ -50,7 +50,7 @@ def _split_command_chains(command: str) -> list[tuple[str, str]]:
             continue
 
         # Check for && (must check before single &)
-        if not in_single and not in_double and command[i:i+2] == "&&":
+        if not in_single and not in_double and command[i : i + 2] == "&&":
             segment = "".join(current).strip()
             if not segment:
                 raise ValueError("empty command before &&")
@@ -60,7 +60,7 @@ def _split_command_chains(command: str) -> list[tuple[str, str]]:
             continue
 
         # Check for || (must check before single |)
-        if not in_single and not in_double and command[i:i+2] == "||":
+        if not in_single and not in_double and command[i : i + 2] == "||":
             segment = "".join(current).strip()
             if not segment:
                 raise ValueError("empty command before ||")
@@ -522,6 +522,113 @@ def _cmd_echo(args: list[str], _stdin: str, _tree: Loopy) -> str:
     return " ".join(args)
 
 
+def _format_printf_once(
+    format_str: str, args: list[str], start: int
+) -> tuple[str, int, bool]:
+    output: list[str] = []
+    used = 0
+    has_conversion = False
+    i = 0
+
+    while i < len(format_str):
+        ch = format_str[i]
+
+        if ch == "%":
+            if i + 1 >= len(format_str):
+                output.append("%")
+                i += 1
+                continue
+            spec = format_str[i + 1]
+            if spec == "%":
+                output.append("%")
+                i += 2
+                continue
+            if spec == "s":
+                has_conversion = True
+                if start + used < len(args):
+                    output.append(args[start + used])
+                    used += 1
+                else:
+                    output.append("")
+                i += 2
+                continue
+            output.append("%" + spec)
+            i += 2
+            continue
+
+        if ch == "\\":
+            if i + 1 >= len(format_str):
+                output.append("\\")
+                i += 1
+                continue
+            nxt = format_str[i + 1]
+            if nxt == "n":
+                output.append("\n")
+                i += 2
+                continue
+            if nxt == "t":
+                output.append("\t")
+                i += 2
+                continue
+            if nxt == "r":
+                output.append("\r")
+                i += 2
+                continue
+            if nxt == "\\":
+                output.append("\\")
+                i += 2
+                continue
+            if nxt == '"':
+                output.append('"')
+                i += 2
+                continue
+            if nxt == "'":
+                output.append("'")
+                i += 2
+                continue
+            if nxt in "01234567":
+                j = i + 1
+                digits: list[str] = []
+                while (
+                    j < len(format_str)
+                    and len(digits) < 3
+                    and format_str[j] in "01234567"
+                ):
+                    digits.append(format_str[j])
+                    j += 1
+                output.append(chr(int("".join(digits), 8)))
+                i = j
+                continue
+            output.append(nxt)
+            i += 2
+            continue
+
+        output.append(ch)
+        i += 1
+
+    return "".join(output), used, has_conversion
+
+
+def _cmd_printf(args: list[str], _stdin: str, _tree: Loopy) -> str:
+    if not args:
+        raise ValueError("printf requires a format")
+    format_str = args[0]
+    format_args = args[1:]
+    rendered, used, has_conversion = _format_printf_once(format_str, format_args, 0)
+
+    if not has_conversion:
+        return rendered
+
+    output = [rendered]
+    index = used
+    while index < len(format_args):
+        chunk, used, _ = _format_printf_once(format_str, format_args, index)
+        output.append(chunk)
+        index += used
+
+    return "".join(output)
+
+
 def _cmd_mv(args: list[str], _stdin: str, tree: Loopy) -> str:
     if len(args) != 2:
         raise ValueError("mv requires source and destination")
@@ -589,7 +696,7 @@ def _cmd_touch(args: list[str], stdin: str, tree: Loopy) -> str:
     if len(args) < 1:
         raise ValueError("touch requires a path")
     path = args[0]
-    content = " ".join(args[1:]) if len(args) > 1 else stdin.strip()
+    content = " ".join(args[1:]) if len(args) > 1 else stdin
     tree.touch(path, content)
     return ""
 
@@ -598,7 +705,7 @@ def _cmd_write(args: list[str], stdin: str, tree: Loopy) -> str:
     if len(args) < 1:
         raise ValueError("write requires a path")
     path = args[0]
-    content = " ".join(args[1:]) if len(args) > 1 else stdin.strip()
+    content = " ".join(args[1:]) if len(args) > 1 else stdin
     tree.write(path, content)
     return ""
 
@@ -802,11 +909,14 @@ def _cmd_sort(args: list[str], stdin: str, tree: Loopy) -> str:
     lines = content.splitlines()
 
     if numeric:
+
         def sort_key(line: str):
             # Extract leading number, default to 0
             import re
+
             match = re.match(r"-?\d+", line.strip())
             return int(match.group()) if match else 0
+
         lines.sort(key=sort_key, reverse=reverse)
     else:
         lines.sort(reverse=reverse)
@@ -902,6 +1012,7 @@ def _cmd_help(_args: list[str], _stdin: str, _tree: Loopy) -> str:
   sed <path> <pattern> <replacement> [-i] [-r] [-c n]
 
   echo <text>         Print text
+  printf <fmt> [args]  Print formatted text
   help                Show this help
 
 Command chaining:
@@ -921,6 +1032,7 @@ COMMANDS: dict[str, Command] = {
     "pwd": _cmd_pwd,
     "cd": _cmd_cd,
     "echo": _cmd_echo,
+    "printf": _cmd_printf,
     "split": _cmd_split,
     "mv": _cmd_mv,
     "cp": _cmd_cp,

@@ -100,6 +100,35 @@ def test_run_write_with_stdin():
     assert run("cat /docs/file", tree) == "new content"
 
 
+def test_write_preserves_newlines():
+    tree = Loopy()
+    tree.mkdir("/docs", parents=True)
+
+    run("write /docs/file line1\nline2", tree)
+    assert run("cat /docs/file", tree) == "line1 line2"
+
+    run("write /docs/file 'line1\nline2'", tree)
+    assert run("cat /docs/file", tree) == "line1\nline2"
+
+    run("printf 'line1\\nline2' | write /docs/file", tree)
+    assert run("cat /docs/file", tree) == "line1\nline2"
+
+
+def test_printf_with_other_tools():
+    tree = Loopy()
+
+    assert run("printf 'hello'", tree) == "hello"
+    assert run("printf 'a\\nb'", tree) == "a\nb"
+    assert run("printf '%s %s' alpha beta", tree) == "alpha beta"
+    assert run("printf '%s\\n' alpha beta", tree) == "alpha\nbeta\n"
+
+    out = run("printf 'alpha\\nbeta\\n' | grep beta", tree)
+    assert out == "beta"
+
+    out = run("printf 'a,b,c' | split -d ,", tree)
+    assert out == "a\nb\nc"
+
+
 def test_mv_into_directory():
     tree = Loopy()
     tree.mkdir("/src", parents=True)
@@ -1427,5 +1456,3 @@ def test_sort_combined_flags():
     tree.touch("/f", "5\n1\n10")
     out = run("sort -rn /f", tree)
     assert out == "10\n5\n1"
-
-
