@@ -13,6 +13,7 @@ Usage:
 """
 
 from .core_v2 import Loopy
+from .file_store import FileBackedLoopy, load, save
 
-__version__ = "0.1.0"
-__all__ = ["Loopy"]
+__version__ = "0.2.3"
+__all__ = ["Loopy", "FileBackedLoopy", "load", "save"]

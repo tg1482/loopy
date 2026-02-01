@@ -80,7 +80,7 @@ tree.ls("/concepts/ml")  # ['supervised', 'unsupervised']
 ### File-backed
 
 ```python
-from loopy.file_store import FileBackedLoopy, load, save
+from loopy import FileBackedLoopy, load, save
 
 tree = FileBackedLoopy("notes.loopy")
 tree.touch("/ideas/mcp", "Expose shell with MCP")  # auto-saved
