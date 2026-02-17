@@ -17,6 +17,31 @@ def _validate_segment(seg: str) -> None:
         )
 
 
+def slugify(value: str) -> str:
+    """Convert a string to a valid Loopy path segment.
+
+    Lowercases, replaces non-alphanumeric runs with hyphens,
+    strips leading/trailing hyphens. Returns "item" for empty results.
+
+    Example:
+        slugify("Hello World!")  # -> "hello-world"
+        slugify("  My File (2).txt")  # -> "my-file-2-.txt"
+    """
+    text = value.strip().lower()
+    out: list[str] = []
+    prev_sep = False
+    for ch in text:
+        if ch.isalnum() or ch in ("_", "."):
+            out.append(ch)
+            prev_sep = False
+        else:
+            if not prev_sep and out:
+                out.append("-")
+                prev_sep = True
+    result = "".join(out).strip("-")
+    return result or "item"
+
+
 def _escape(text: str) -> str:
     """Escape special characters for storage."""
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -696,6 +721,7 @@ class Loopy:
         ignore_case: bool = True,
         invert: bool = False,
         count: bool = False,
+        lines: bool = False,
     ) -> list[str] | int:
         """
         Search for nodes matching a pattern.
@@ -707,9 +733,13 @@ class Loopy:
             ignore_case: Case insensitive matching (default: True)
             invert: Return non-matching paths instead (-v flag)
             count: Return count instead of list (-c flag)
+            lines: If True, search file content line-by-line and return
+                   "path:lineno:line" strings (implies content=True).
+                   Incompatible with count.
 
         Returns:
-            List of matching paths, or count if count=True
+            List of matching paths (or "path:lineno:line" if lines=True),
+            or count if count=True
         """
         path = self._resolve(path)
         flags = re.IGNORECASE if ignore_case else 0
@@ -717,6 +747,22 @@ class Loopy:
         results: list[str] = []
 
         start_node = self._get_node(path)
+
+        if lines:
+            def _walk_lines(node: Node, current_path: str) -> None:
+                node_content = self._cat_node(node)
+                if node_content:
+                    for lineno, line in enumerate(node_content.splitlines(), 1):
+                        matched = bool(regex.search(line))
+                        if invert:
+                            matched = not matched
+                        if matched:
+                            results.append(f"{current_path}:{lineno}:{line}")
+                for child in node.children:
+                    _walk_lines(child, self._child_path(current_path, child.name))
+
+            _walk_lines(start_node, path)
+            return results
 
         def _walk(node: Node, current_path: str) -> None:
             name = "root" if current_path == "/" else current_path.split("/")[-1]

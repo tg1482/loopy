@@ -61,6 +61,60 @@ class TestGrep:
         assert "/logs/errors/error_002" in results
         assert "/logs/errors" not in results
 
+    def test_grep_lines_basic(self):
+        """lines=True returns path:lineno:line format."""
+        tree = Loopy()
+        tree.touch("/f", "alpha\nbeta\ngamma")
+        results = tree.grep("beta", lines=True)
+        assert results == ["/f:2:beta"]
+
+    def test_grep_lines_multiline(self):
+        """lines=True matches multiple lines across files."""
+        tree = Loopy()
+        tree.touch("/a", "foo bar\nbaz\nfoo end")
+        tree.touch("/b", "no match\nfoo here")
+        results = tree.grep("foo", lines=True)
+        assert "/a:1:foo bar" in results
+        assert "/a:3:foo end" in results
+        assert "/b:2:foo here" in results
+        assert len(results) == 3
+
+    def test_grep_lines_case_insensitive(self):
+        """lines=True respects ignore_case."""
+        tree = Loopy()
+        tree.touch("/f", "Hello\nhello\nHELLO")
+        results = tree.grep("hello", lines=True, ignore_case=True)
+        assert len(results) == 3
+        results = tree.grep("hello", lines=True, ignore_case=False)
+        assert len(results) == 1
+        assert results[0] == "/f:2:hello"
+
+    def test_grep_lines_invert(self):
+        """lines=True with invert returns non-matching lines."""
+        tree = Loopy()
+        tree.touch("/f", "keep\ndrop\nkeep too")
+        results = tree.grep("drop", lines=True, invert=True)
+        assert "/f:1:keep" in results
+        assert "/f:3:keep too" in results
+        assert len(results) == 2
+
+    def test_grep_lines_empty_file(self):
+        """lines=True on empty files returns nothing."""
+        tree = Loopy()
+        tree.mkdir("/d")
+        tree.touch("/d/empty")
+        results = tree.grep("anything", lines=True)
+        assert results == []
+
+    def test_grep_lines_scoped(self):
+        """lines=True respects path scope."""
+        tree = Loopy()
+        tree.touch("/a/f", "match")
+        tree.touch("/b/f", "match")
+        results = tree.grep("match", path="/a", lines=True)
+        assert len(results) == 1
+        assert results[0].startswith("/a/")
+
 
 class TestSed:
     """Test sed with various options."""
@@ -538,3 +592,61 @@ class TestHeadTail:
 
         assert tree.tail("/doc", 5) == "lmnop"
         assert tree.tail("/doc", 100) == "abcdefghijklmnop"
+
+
+class TestSlugify:
+    """Test slugify utility."""
+
+    def test_basic(self):
+        from loopy import slugify
+
+        assert slugify("Hello World") == "hello-world"
+
+    def test_special_chars(self):
+        from loopy import slugify
+
+        assert slugify("My File (2)!") == "my-file-2"
+
+    def test_preserves_dots(self):
+        from loopy import slugify
+
+        assert slugify("report.pdf") == "report.pdf"
+
+    def test_preserves_underscores(self):
+        from loopy import slugify
+
+        assert slugify("my_file") == "my_file"
+
+    def test_collapses_separators(self):
+        from loopy import slugify
+
+        assert slugify("a   b   c") == "a-b-c"
+
+    def test_strips_leading_trailing(self):
+        from loopy import slugify
+
+        assert slugify("  hello  ") == "hello"
+        assert slugify("---hello---") == "hello"
+
+    def test_empty_returns_item(self):
+        from loopy import slugify
+
+        assert slugify("") == "item"
+        assert slugify("!!!") == "item"
+
+    def test_result_is_valid_path_segment(self):
+        """Every slugify result should be a valid loopy path segment."""
+        from loopy import Loopy, slugify
+
+        tree = Loopy()
+        for name in ["Hello World!", "café résumé", "file (copy 2).txt", "100% done"]:
+            slug = slugify(name)
+            tree.touch(f"/{slug}", "ok")
+            assert tree.cat(f"/{slug}") == "ok"
+
+    def test_unicode(self):
+        from loopy import slugify
+
+        # Unicode alphanumerics are preserved (\w includes them)
+        result = slugify("café")
+        assert result == "café"

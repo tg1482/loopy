@@ -12,8 +12,8 @@ Usage:
     tree.grep("mam")  # -> ["/animals/mammals"]
 """
 
-from .core_v2 import Loopy
+from .core_v2 import Loopy, slugify
 from .file_store import FileBackedLoopy, load, save
 
-__version__ = "0.2.3"
-__all__ = ["Loopy", "FileBackedLoopy", "load", "save"]
+__version__ = "0.3.0"
+__all__ = ["Loopy", "FileBackedLoopy", "load", "save", "slugify"]

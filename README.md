@@ -120,7 +120,8 @@ uv pip install loopy-fs
 
 | Method | Description |
 |--------|-------------|
-| `grep(pattern, content=True)` | Search by regex |
+| `grep(pattern, content=True)` | Search by regex (returns paths) |
+| `grep(pattern, lines=True)` | Search content line-by-line (returns `path:lineno:line`) |
 | `find(path, type="f")` | Find by type (f=file, d=dir, l=link) |
 | `glob(pattern)` | Glob patterns (`**/*.py`) |
 
@@ -146,9 +147,23 @@ uv pip install loopy-fs
 | `walk(path)` | os.walk() style |
 | `.raw` | The underlying string |
 
-All mutating operations return `self` for chaining.
+### Utilities
 
-Not all commands are supported in the shell format yet. Working towards it.
+| Function | Description |
+|----------|-------------|
+| `slugify(text)` | Convert any string to a valid path segment |
+
+```python
+from loopy import slugify
+
+slugify("Hello World!")      # -> "hello-world"
+slugify("My File (2).txt")  # -> "my-file-2-.txt"
+slugify("café résumé")      # -> "café-résumé"
+```
+
+Path segments only allow alphanumeric characters, underscores, hyphens, and dots. `slugify` converts anything else into a safe form.
+
+All mutating operations return `self` for chaining.
 
 ## Shell
 
@@ -211,7 +226,7 @@ loopy> find /sports -type f
 | `sort [-rnu] [path]` | Sort lines |
 | `tree [path]` | Show tree structure |
 | `find [path] [-name pat] [-type d\|f\|l]` | Find files/directories/symlinks |
-| `grep <pat> [path] [-i] [-v] [-c]` | Search by regex |
+| `grep <pat> [path] [-i] [-v] [-c] [-n]` | Search by regex (`-n` for line matches) |
 | `du [path] [-c]` | Count nodes or content size |
 | `info [path]` | Show node metadata |
 | `touch <path> [content]` | Create file |
@@ -254,6 +269,9 @@ def:Attention-based architecture|prereq:attention,mlp|paper:attention_is_all_you
 
 loopy> grep "prereq:.*transformer" -c
 2
+
+loopy> grep -n "price:.*99" /clothing
+/clothing/mens/shoes/loafers_brown:1:type:formal|price:89.99|color:brown
 ```
 
 Or load in Python:
