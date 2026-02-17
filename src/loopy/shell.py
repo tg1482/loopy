@@ -381,10 +381,11 @@ def _cmd_cat(args: list[str], stdin: str, tree: Loopy) -> str:
     return content
 
 
-def _parse_grep_args(args: list[str]) -> tuple[str, str | None, bool, bool, bool]:
+def _parse_grep_args(args: list[str]) -> tuple[str, str | None, bool, bool, bool, bool]:
     ignore_case = False
     invert = False
     count = False
+    line_mode = False
     pattern: str | None = None
     path: str | None = None
     flags_done = False
@@ -406,6 +407,8 @@ def _parse_grep_args(args: list[str]) -> tuple[str, str | None, bool, bool, bool
                         invert = True
                     elif flag == "c":
                         count = True
+                    elif flag == "n":
+                        line_mode = True
                     else:
                         raise ValueError(f"unknown grep flag: -{flag}")
                 i += 1
@@ -422,22 +425,39 @@ def _parse_grep_args(args: list[str]) -> tuple[str, str | None, bool, bool, bool
     if pattern is None:
         raise ValueError("grep requires a pattern")
 
-    return pattern, path, ignore_case, invert, count
+    return pattern, path, ignore_case, invert, count, line_mode
 
 
 def _cmd_grep(args: list[str], stdin: str, tree: Loopy) -> str:
-    pattern, path, ignore_case, invert, count = _parse_grep_args(args)
+    pattern, path, ignore_case, invert, count, line_mode = _parse_grep_args(args)
     flags = re.IGNORECASE if ignore_case else 0
     regex = re.compile(pattern, flags)
 
     if stdin and path is None:
         lines = stdin.splitlines()
+        if line_mode:
+            matched = []
+            for lineno, line in enumerate(lines, 1):
+                if bool(regex.search(line)) != invert:
+                    matched.append(f"{lineno}:{line}")
+            return "\n".join(matched)
         matched = [line for line in lines if bool(regex.search(line)) != invert]
         if count:
             return str(len(matched))
         return "\n".join(matched)
 
     search_path = path or "."
+
+    if line_mode:
+        results = tree.grep(
+            pattern,
+            path=search_path,
+            ignore_case=ignore_case,
+            invert=invert,
+            lines=True,
+        )
+        return "\n".join(results)
+
     results = tree.grep(
         pattern,
         path=search_path,

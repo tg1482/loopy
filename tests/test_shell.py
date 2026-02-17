@@ -489,6 +489,27 @@ def test_ls_classify_default():
     assert not out.endswith("file/")
 
 
+def test_ls_root():
+    """ls / lists top-level entries in the root."""
+    tree = Loopy()
+    # Empty root
+    out = run("ls /", tree)
+    assert out == ""
+
+    # Populate root with a mix of dirs and files
+    tree.mkdir("/projects")
+    tree.mkdir("/docs")
+    tree.touch("/readme", "hello")
+    out = run("ls /", tree)
+    assert "projects/" in out
+    assert "docs/" in out
+    assert "readme" in out
+    # readme should NOT have a trailing /
+    for line in out.splitlines():
+        if line.startswith("readme"):
+            assert line == "readme"
+
+
 def test_cat_default_reads_from_stdin():
     """cat with no path reads from stdin."""
     tree = Loopy()
@@ -770,6 +791,45 @@ def test_grep_special_regex_chars():
     # Literal dot requires escaping
     out = run(r"cat /file | grep 'file\.txt'", tree)
     assert out == "file.txt"
+
+
+def test_grep_n_flag_on_files():
+    """grep -n searches file content and returns path:lineno:line."""
+    tree = Loopy()
+    tree.touch("/log", "INFO start\nERROR bad thing\nINFO end")
+    out = run("grep -n ERROR /log", tree)
+    assert out == "/log:2:ERROR bad thing"
+
+
+def test_grep_n_flag_recursive():
+    """grep -n searches across multiple files."""
+    tree = Loopy()
+    tree.touch("/a/f1", "hello world")
+    tree.touch("/a/f2", "goodbye world")
+    out = run("grep -n world /a", tree)
+    lines = out.splitlines()
+    assert len(lines) == 2
+    assert "/a/f1:1:hello world" in lines
+    assert "/a/f2:1:goodbye world" in lines
+
+
+def test_grep_n_flag_with_stdin():
+    """grep -n on piped stdin returns lineno:line."""
+    tree = Loopy()
+    out = run("echo 'aaa\nbbb\naaa' | grep -n aaa", tree)
+    lines = out.splitlines()
+    assert "1:aaa" in lines
+    assert "3:aaa" in lines
+    assert len(lines) == 2
+
+
+def test_grep_n_combined_flags():
+    """grep -ni combines line mode with case insensitive."""
+    tree = Loopy()
+    tree.touch("/f", "Hello\nhello\nworld")
+    out = run("grep -ni hello /f", tree)
+    lines = out.splitlines()
+    assert len(lines) == 2
 
 
 def test_unknown_command_error():
