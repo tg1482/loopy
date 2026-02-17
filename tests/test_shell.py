@@ -434,10 +434,6 @@ def test_cat_range_errors():
     with pytest.raises(ValueError, match="unknown cat option"):
         run("cat /file -x", tree)
 
-    # Multiple paths
-    with pytest.raises(ValueError, match="cat takes at most one path"):
-        run("cat /file /file2", tree)
-
 
 def test_help_includes_head():
     tree = Loopy()
@@ -1516,3 +1512,81 @@ def test_sort_combined_flags():
     tree.touch("/f", "5\n1\n10")
     out = run("sort -rn /f", tree)
     assert out == "10\n5\n1"
+
+
+# ============================================================================
+# cat multiple paths tests
+# ============================================================================
+
+
+def test_cat_multiple_paths():
+    """cat with multiple paths concatenates their contents."""
+    tree = Loopy()
+    tree.touch("/a", "hello")
+    tree.touch("/b", "world")
+    out = run("cat /a /b", tree)
+    assert out == "hello\nworld"
+
+
+def test_cat_multiple_paths_three_files():
+    """cat with three paths concatenates all."""
+    tree = Loopy()
+    tree.touch("/x", "one")
+    tree.touch("/y", "two")
+    tree.touch("/z", "three")
+    out = run("cat /x /y /z", tree)
+    assert out == "one\ntwo\nthree"
+
+
+def test_cat_multiple_paths_with_newlines_in_content():
+    """cat multi-path preserves internal newlines."""
+    tree = Loopy()
+    tree.touch("/a", "line1\nline2")
+    tree.touch("/b", "line3\nline4")
+    out = run("cat /a /b", tree)
+    assert out == "line1\nline2\nline3\nline4"
+
+
+def test_cat_multiple_paths_empty_file():
+    """cat multi-path with an empty file still joins correctly."""
+    tree = Loopy()
+    tree.touch("/a", "hello")
+    tree.touch("/b", "")
+    tree.touch("/c", "world")
+    out = run("cat /a /b /c", tree)
+    assert out == "hello\n\nworld"
+
+
+def test_cat_multiple_paths_piped_to_grep():
+    """cat multi-path output can be piped."""
+    tree = Loopy()
+    tree.touch("/auth/state", "logged_in: true")
+    tree.touch("/auth/login", "endpoint: /api/login")
+    tree.touch("/auth/logout", "endpoint: /api/logout")
+    out = run("cat /auth/state /auth/login /auth/logout | grep endpoint", tree)
+    assert "endpoint: /api/login" in out
+    assert "endpoint: /api/logout" in out
+
+
+def test_cat_multiple_paths_with_range():
+    """cat multi-path with --range applies range to the concatenated output."""
+    tree = Loopy()
+    tree.touch("/a", "hello")
+    tree.touch("/b", "world")
+    out = run("cat /a /b --range 0 5", tree)
+    assert out == "hello"
+
+
+def test_cat_single_path_still_works():
+    """cat with a single path still works as before."""
+    tree = Loopy()
+    tree.touch("/file", "content")
+    out = run("cat /file", tree)
+    assert out == "content"
+
+
+def test_cat_no_path_reads_stdin():
+    """cat with no path still reads from stdin."""
+    tree = Loopy()
+    out = run("echo hello | cat", tree)
+    assert out == "hello"

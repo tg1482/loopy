@@ -219,7 +219,7 @@ loopy> find /sports -type f
 | `ls [path] [-R]` | List directory contents |
 | `cd <path>` | Change directory |
 | `pwd` | Print working directory |
-| `cat [path] [--range start len]` | Show file contents |
+| `cat [path...] [--range start len]` | Show/concatenate file contents |
 | `head [path] [-n N]` | Show first N lines (default 10) |
 | `tail [path] [-n N]` | Show last N lines (default 10) |
 | `wc [-lwc] [path]` | Count lines/words/chars |

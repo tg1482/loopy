@@ -335,7 +335,7 @@ def _cmd_ls(args: list[str], _stdin: str, tree: Loopy) -> str:
 
 
 def _cmd_cat(args: list[str], stdin: str, tree: Loopy) -> str:
-    path: str | None = None
+    paths: list[str] = []
     start: int | None = None
     length: int | None = None
 
@@ -365,15 +365,15 @@ def _cmd_cat(args: list[str], stdin: str, tree: Loopy) -> str:
             continue
         if arg.startswith("-"):
             raise ValueError(f"unknown cat option: {arg}")
-        if path is not None:
-            raise ValueError("cat takes at most one path")
-        path = arg
+        paths.append(arg)
         i += 1
 
-    if path is None:
+    if not paths:
         content = stdin
+    elif len(paths) == 1:
+        content = tree.cat(paths[0])
     else:
-        content = tree.cat(path)
+        content = "\n".join(tree.cat(p) for p in paths)
 
     if start is not None and length is not None:
         return content[start : start + length]
@@ -1018,7 +1018,7 @@ def _cmd_help(_args: list[str], _stdin: str, _tree: Loopy) -> str:
   cd <path>           Change directory
   pwd                 Print working directory
   info [path]         Show node metadata
-  cat [path] [--range start length]  Show file contents
+  cat [path...] [--range start length]  Show/concatenate file contents
   head [path] [-n N]  Show first N lines (default 10)
   tail [path] [-n N]  Show last N lines (default 10)
   wc [-lwc] [path]    Count lines/words/chars
