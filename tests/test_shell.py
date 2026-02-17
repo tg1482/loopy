@@ -1590,3 +1590,35 @@ def test_cat_no_path_reads_stdin():
     tree = Loopy()
     out = run("echo hello | cat", tree)
     assert out == "hello"
+
+
+def test_cat_multiple_paths_piped_to_write():
+    """cat multi-path piped to write saves concatenated content."""
+    tree = Loopy()
+    tree.touch("/a", "hello")
+    tree.touch("/b", "world")
+    tree.touch("/c", "goodbye")
+    run("cat /a /b /c | write /combined", tree)
+    assert run("cat /combined", tree) == "hello\nworld\ngoodbye"
+
+
+def test_cat_multiple_paths_piped_to_touch():
+    """cat multi-path piped to touch saves concatenated content."""
+    tree = Loopy()
+    tree.touch("/a", "one")
+    tree.touch("/b", "two")
+    run("cat /a /b | touch /merged", tree)
+    assert run("cat /merged", tree) == "one\ntwo"
+
+
+def test_cat_multiple_paths_grep_then_write():
+    """cat multi-path | grep | write filters and saves."""
+    tree = Loopy()
+    tree.touch("/auth/state", "logged_in: true")
+    tree.touch("/auth/login", "endpoint: /api/login")
+    tree.touch("/auth/logout", "endpoint: /api/logout")
+    run("cat /auth/state /auth/login /auth/logout | grep endpoint | write /endpoints", tree)
+    out = run("cat /endpoints", tree)
+    assert "endpoint: /api/login" in out
+    assert "endpoint: /api/logout" in out
+    assert "logged_in" not in out

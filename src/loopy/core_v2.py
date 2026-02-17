@@ -189,23 +189,38 @@ def parse(data: str) -> Node:
 
 
 def emit(node: Node) -> str:
-    """Serialize a Node tree to raw loopy data.
+    """Serialize a Node tree to raw loopy data (iterative).
 
     Symlinks are serialized as: <name @="/target/path"/>
     """
-    # Handle symlinks first - they're always self-closing with the @ attribute
-    if node.link_target is not None:
-        # Escape special characters in the link target
-        escaped_target = _escape(node.link_target)
-        return f'<{node.name} @="{escaped_target}"/>'
+    parts: list[str] = []
+    # Stack holds either nodes to open or closing tag strings
+    stack: list[Node | str] = [node]
 
-    if node.self_closing and not node.children and not node.text:
-        return f"<{node.name}/>"
+    while stack:
+        item = stack.pop()
 
-    inner = _escape(node.text)
-    for child in node.children:
-        inner += emit(child)
-    return f"<{node.name}>{inner}</{node.name}>"
+        if isinstance(item, str):
+            # Closing tag
+            parts.append(item)
+            continue
+
+        if item.link_target is not None:
+            escaped_target = _escape(item.link_target)
+            parts.append(f'<{item.name} @="{escaped_target}"/>')
+            continue
+
+        if item.self_closing and not item.children and not item.text:
+            parts.append(f"<{item.name}/>")
+            continue
+
+        parts.append(f"<{item.name}>{_escape(item.text)}")
+        # Push closing tag first (processed last), then children in reverse
+        stack.append(f"</{item.name}>")
+        for child in reversed(item.children):
+            stack.append(child)
+
+    return "".join(parts)
 
 
 class Loopy:
@@ -749,7 +764,9 @@ class Loopy:
         start_node = self._get_node(path)
 
         if lines:
-            def _walk_lines(node: Node, current_path: str) -> None:
+            stack = [(start_node, path)]
+            while stack:
+                node, current_path = stack.pop()
                 node_content = self._cat_node(node)
                 if node_content:
                     for lineno, line in enumerate(node_content.splitlines(), 1):
@@ -758,13 +775,13 @@ class Loopy:
                             matched = not matched
                         if matched:
                             results.append(f"{current_path}:{lineno}:{line}")
-                for child in node.children:
-                    _walk_lines(child, self._child_path(current_path, child.name))
-
-            _walk_lines(start_node, path)
+                for child in reversed(node.children):
+                    stack.append((child, self._child_path(current_path, child.name)))
             return results
 
-        def _walk(node: Node, current_path: str) -> None:
+        stack = [(start_node, path)]
+        while stack:
+            node, current_path = stack.pop()
             name = "root" if current_path == "/" else current_path.split("/")[-1]
             matches = bool(regex.search(name))
 
@@ -779,10 +796,9 @@ class Loopy:
             if matches:
                 results.append(current_path)
 
-            for child in node.children:
-                _walk(child, self._child_path(current_path, child.name))
+            for child in reversed(node.children):
+                stack.append((child, self._child_path(current_path, child.name)))
 
-        _walk(start_node, path)
         return len(results) if count else results
 
     def sed(
@@ -823,11 +839,13 @@ class Loopy:
         _apply(path)
 
         if recursive:
-            for child in self.ls(path):
-                child_path = f"{path.rstrip('/')}/{child}"
-                self.sed(
-                    child_path, pattern, replacement, count, ignore_case, recursive=True
-                )
+            stack = [path]
+            while stack:
+                current = stack.pop()
+                for child in self.ls(current):
+                    child_path = f"{current.rstrip('/')}/{child}"
+                    _apply(child_path)
+                    stack.append(child_path)
 
         return self
 
@@ -840,13 +858,13 @@ class Loopy:
         node = self._get_node(path)
         lines: list[str] = []
 
-        def _walk(
-            current_node: Node,
-            current_path: str,
-            prefix: str,
-            is_last: bool,
-            is_root: bool,
-        ) -> None:
+        # Iterative tree walk using stack
+        # Each entry: (node, path, prefix, is_last, is_root)
+        stack: list[tuple[Node, str, str, bool, bool]] = [
+            (node, path, "", True, True)
+        ]
+        while stack:
+            current_node, current_path, prefix, is_last, is_root = stack.pop()
             name = "root" if current_path == "/" else current_node.name
 
             if is_root:
@@ -854,7 +872,6 @@ class Loopy:
             else:
                 connector = "└── " if is_last else "├── "
 
-            # Handle symlinks specially
             if current_node.link_target is not None:
                 lines.append(f"{prefix}{connector}{name} -> {current_node.link_target}")
             else:
@@ -866,15 +883,15 @@ class Loopy:
                     lines.append(f"{prefix}{connector}{name}/")
 
             children = current_node.children
-            for i, child in enumerate(children):
+            # Push children in reverse so first child is processed first
+            for i in range(len(children) - 1, -1, -1):
+                child = children[i]
                 child_is_last = i == len(children) - 1
                 child_path = self._child_path(current_path, child.name)
                 child_prefix = (
                     "" if is_root else prefix + ("    " if is_last else "│   ")
                 )
-                _walk(child, child_path, child_prefix, child_is_last, False)
-
-        _walk(node, path, "", True, True)
+                stack.append((child, child_path, child_prefix, child_is_last, False))
         return "\n".join(lines)
 
     def find(
@@ -895,7 +912,9 @@ class Loopy:
         results: list[str] = []
         pattern = re.compile(name, re.IGNORECASE) if name else None
 
-        def _walk(node: Node, current_path: str) -> None:
+        stack = [(start, path)]
+        while stack:
+            node, current_path = stack.pop()
             node_name = "root" if current_path == "/" else node.name
             children = node.children
             is_link = node.link_target is not None
@@ -913,10 +932,8 @@ class Loopy:
             if type_matches and (pattern is None or pattern.search(node_name)):
                 results.append(current_path)
 
-            for child in children:
-                _walk(child, self._child_path(current_path, child.name))
-
-        _walk(start, path)
+            for child in reversed(children):
+                stack.append((child, self._child_path(current_path, child.name)))
         return results
 
     def walk(self, path: str = ".") -> list[tuple[str, list[str], list[str]]]:
@@ -929,7 +946,9 @@ class Loopy:
         start = self._get_node(path)
         results: list[tuple[str, list[str], list[str]]] = []
 
-        def _walk(node: Node, current_path: str) -> None:
+        stack = [(start, path)]
+        while stack:
+            node, current_path = stack.pop()
             children = node.children
             dirs: list[str] = []
             files: list[str] = []
@@ -939,12 +958,10 @@ class Loopy:
                 else:
                     files.append(child.name)
             results.append((current_path, dirs, files))
-            for d in dirs:
+            for d in reversed(dirs):
                 child = self._get_child(node, d)
                 if child is not None:
-                    _walk(child, self._child_path(current_path, d))
-
-        _walk(start, path)
+                    stack.append((child, self._child_path(current_path, d)))
         return results
 
     def glob(self, pattern: str, path: str = ".") -> list[str]:
@@ -967,13 +984,13 @@ class Loopy:
 
         start = self._get_node(path)
 
-        def _walk(node: Node, current_path: str) -> None:
+        stack = [(start, path)]
+        while stack:
+            node, current_path = stack.pop()
             if regex.match(current_path):
                 results.append(current_path)
-            for child in node.children:
-                _walk(child, self._child_path(current_path, child.name))
-
-        _walk(start, path)
+            for child in reversed(node.children):
+                stack.append((child, self._child_path(current_path, child.name)))
         return results
 
     def head(self, path: str, n: int = 10) -> str:
@@ -1000,16 +1017,15 @@ class Loopy:
         start = self._get_node(path)
         total = 0
 
-        def _walk(node: Node) -> None:
-            nonlocal total
+        stack = [start]
+        while stack:
+            node = stack.pop()
             if content_size:
                 total += len(self._cat_node(node))
             else:
                 total += 1
             for child in node.children:
-                _walk(child)
-
-        _walk(start)
+                stack.append(child)
         return total
 
     def info(self, path: str = ".", follow_links: bool = True) -> dict:
@@ -1151,11 +1167,11 @@ class Loopy:
         path = self._resolve(path)
         results: list[str] = []
 
-        def _walk(node: Node, current_path: str) -> None:
+        stack = [(self._root, "/")]
+        while stack:
+            node, current_path = stack.pop()
             if node.link_target == path:
                 results.append(current_path)
-            for child in node.children:
-                _walk(child, self._child_path(current_path, child.name))
-
-        _walk(self._root, "/")
+            for child in reversed(node.children):
+                stack.append((child, self._child_path(current_path, child.name)))
         return results

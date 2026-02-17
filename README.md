@@ -284,6 +284,38 @@ tree.ls("/clothing/mens/shoes")  # ['loafers_brown']
 tree.grep("price:.*99", content=True)  # products ending in .99
 ```
 
+## Performance
+
+All tree operations are iterative (no recursion limits). Benchmarked on Python 3.12:
+
+### Wide trees (many files)
+
+| Operation | 10K files (907 KB) | 100K files (8.9 MB) |
+|---|---|---|
+| Build | 138ms | 1.68s |
+| Serialize (.raw) | 5ms | 53ms |
+| Cached .raw | 1us | 1us |
+| Parse (from raw) | 18ms | 232ms |
+| cat (1 file) | 0.1ms | 0.06ms |
+| cat (10 files) | 0.2ms | 0.1ms |
+| ls (1 dir) | 0.1ms | 0.1ms |
+| grep (full tree) | 5ms | 49ms |
+| find -type f | 3ms | 29ms |
+| du | 0.6ms | 7ms |
+
+### Deep trees (nested directories)
+
+| Operation | 100 deep | 1,000 deep | 5,000 deep | 10,000 deep |
+|---|---|---|---|---|
+| Build | 0.3ms | 2.5ms | 14ms | 30ms |
+| Serialize | 0.05ms | 0.4ms | 1.8ms | 3.4ms |
+| Parse | 0.1ms | 1.3ms | 7ms | 14ms |
+| cat (leaf) | 0.05ms | 0.4ms | 1.9ms | 4ms |
+| grep (full) | 0.2ms | 12ms | 258ms | 1.01s |
+| find -type f | 0.04ms | 0.4ms | 2.8ms | 10ms |
+
+Run benchmarks: `uv run python stress_test.py`
+
 ## License
 
 MIT
