@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+### New features
+
+- **`cat` multi-path support** — `cat` now accepts multiple paths and concatenates their contents (POSIX-standard behavior). Example: `cat /auth/state /auth/login /auth/logout` outputs all three files joined by newlines. Works with `--range` and piping.
+
 ## 0.3.0
 
 ### New features
